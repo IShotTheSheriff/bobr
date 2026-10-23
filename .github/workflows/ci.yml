@@ -35,8 +35,10 @@ jobs:
         run: node --test scripts/test_vercel_reuse.cjs
       - name: Install Bazelisk
         run: npm install -g @bazel/bazelisk
-      # Only the browser tests need these libraries. Installing them while Bazel
-      # runs the other checks means a slow package mirror delays only those tests.
+      # Only browser tests that actually execute need these libraries, and the
+      # runner image already ships most of them for its preinstalled Chrome.
+      # Install in the background so a slow package mirror never blocks a run
+      # whose browser results come from cache.
       - name: Start installing browser system libraries
         run: |
           (npx --yes playwright@1.61.0 install-deps chromium > "$RUNNER_TEMP/browser-deps.log" 2>&1
@@ -66,16 +68,23 @@ jobs:
           find .bazel-cache -type f | wc -l > "$RUNNER_TEMP/cache-entries"
       - name: Build, then run checks that need no browser
         run: python3 scripts/bazel.py test //... --test_tag_filters=-browser --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/checks.exec.json"
-      - name: Wait for browser system libraries
+      # Bazel never caches a failed test, so a retry after the libraries arrive
+      # runs the browser tests again. A real failure still fails the retry.
+      - name: Run browser tests against the deployment archives
         run: |
+          test_browser() {
+            python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" \
+              --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/browser-$1.exec.json"
+          }
+          test_browser first && exit 0
+          echo "::notice::Retrying browser tests after their system libraries finish installing."
           while [ ! -f "$RUNNER_TEMP/browser-deps.status" ]; do sleep 2; done
           tail -n 3 "$RUNNER_TEMP/browser-deps.log"
-          exit "$(cat "$RUNNER_TEMP/browser-deps.status")"
-      - name: Run browser tests against the deployment archives
-        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/browser.exec.json"
+          [ "$(cat "$RUNNER_TEMP/browser-deps.status")" = 0 ] || exit 1
+          test_browser retry
       - name: Summarize what ran and what came from cache
         if: always()
-        run: python3 scripts/ci-summary.py "$RUNNER_TEMP/checks.exec.json" "$RUNNER_TEMP/browser.exec.json"
+        run: python3 scripts/ci-summary.py "$RUNNER_TEMP"/checks.exec.json "$RUNNER_TEMP"/browser-*.exec.json
       - name: Package the tested artifacts
         run: |
           mkdir -p artifacts
