@@ -1,0 +1,47 @@
+name: Self-hosted cache acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, bazel]
+    paths:
+      - infra/bazel-cache/**
+      - scripts/verify*cache.py
+      - scripts/verify-cache-access.py
+      - scripts/bazel.py
+      - .github/workflows/self-hosted-cache.yml
+  pull_request:
+    paths:
+      - infra/bazel-cache/**
+      - scripts/verify*cache.py
+      - scripts/verify-cache-access.py
+      - scripts/bazel.py
+      - .github/workflows/self-hosted-cache.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install Bazelisk and browser system libraries
+        run: |
+          npm install -g @bazel/bazelisk
+          npx --yes playwright@1.61.0 install-deps chromium
+      - name: Validate AWS infrastructure template
+        run: |
+          pipx run --spec cfn-lint cfn-lint infra/bazel-cache/aws.yml
+      - name: Verify cache permissions and reuse across fresh clients
+        run: python3 scripts/verify-self-hosted-cache.py --bazel --directory "${{ runner.temp }}/self-hosted-proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: self-hosted-cache-evidence
+          path: ${{ runner.temp }}/self-hosted-proof/results.json
+          if-no-files-found: ignore

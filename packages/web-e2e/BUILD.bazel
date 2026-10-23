@@ -1,0 +1,5 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//tools/bazel:defs.bzl", "next_app_e2e")
+
+npm_link_all_packages()
+next_app_e2e(app = "web")

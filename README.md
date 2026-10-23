@@ -1,102 +1,119 @@
-# Turborepo Build/Test Optimization Demo
+# Bóbr
 
-This repository demonstrates advanced build and test caching optimizations using Turborepo and Next.js with Turbopack. The goal is to achieve **deterministic builds** and **intelligent test caching** that respects tree-shaking and only invalidates tests when the actual build output changes.
+Bóbr tests whether a TypeScript monorepo can skip work when shared code changes
+without affecting an app. Bazel owns cache keys. Developers write ordinary
+imports, including imports through a barrel.
 
-## Purpose
-
-This project tests whether we can optimize Turborepo caching to:
-
-1. Avoid unnecessary rebuilds when changes in shared packages don't affect consuming apps
-2. Reuse test cache when build outputs remain identical (even if builds ran)
-3. Leverage tree-shaking to ensure unused code doesn't affect build artifacts
-
-## Architecture
-
-- **Apps**: `apps/web` and `apps/docs` (Next.js applications)
-- **Shared Package**: `packages/ui` (`@repo/ui`) - shared UI components and utilities
-- **E2E Tests**: `packages/web-e2e` and `packages/docs-e2e` - test packages that depend on build outputs
-
-### Current Usage Pattern
-
-- `apps/web` imports `sub` from `@repo/ui/utils`
-- `apps/docs` imports `add` from `@repo/ui/utils`
-- Both apps import from the **barrel file** `@repo/ui/utils/index.ts` which exports both `add` and `sub`
-
-## How It Works
-
-### Tree-Shaking with Barrel Files
-
-The optimization leverages Next.js `optimizePackageImports` and package-level `sideEffects: false` to enable aggressive tree-shaking:
-
-1. **Barrel File Exports**: `packages/ui/src/utils/index.ts` exports both `add` and `sub`
-2. **Selective Imports**: Each app only imports what it uses (`web` → `sub`, `docs` → `add`)
-3. **Tree-Shaking**: Next.js/Turbopack removes unused exports from the final bundle
-4. **Result**: Changing `add.ts` only affects `docs` build output, not `web` build output
-
-### Smart Test Caching
-
-The `scripts/hash-build.ts` script calculates content hashes of build outputs (`.next` directories) and writes them to `build.hash` files. The `e2e:test` task uses these hashes as inputs instead of depending on `^build`:
-
-- If build output changes → hash changes → `build.hash` updates → e2e test cache invalidates
-- If build output is identical → hash unchanged → `build.hash` unchanged → e2e test cache hits
-
-## Testing
-
-### Basic Test: Cache Verification
-
-Run the e2e tests twice in a row:
+## Development and CI
 
 ```bash
-bun e2e:test
-bun e2e:test
+pnpm install
+pnpm dev                     # Next dev servers use the original sources
+pnpm build                   # Bazel builds both Vercel artifacts
+pnpm test                    # Unit, projection and artifact browser tests
+pnpm e2e:test                # Just the artifact browser tests
+pnpm test:bazel-next          # Disposable mutation and remote-cache experiment
 ```
 
-**Expected Result**:
+Install Bazelisk before using the Bazel commands. The browser targets support
+Linux x64 and macOS arm64. Linux also needs Chromium's system libraries, which
+CI installs with the pinned Playwright CLI. Locally, run
+`pnpm --filter @repo/web-e2e exec playwright install-deps chromium`.
+Bazel downloads the pinned browser. After updating Playwright, run
+`node scripts/update-chromium.cjs` to generate its version and archive hashes.
 
-- **First run**: All builds and tests run (4 tasks total)
-- **Second run**: All tasks use cache (4 cached results)
+`pnpm build`, `pnpm test` and CI use `scripts/bazel.py`. It reads shared-cache
+configuration from the environment and otherwise uses the local disk cache.
+Developers do not calculate build hashes. `pnpm dev` does not populate production
+build cache entries. Run `pnpm build` or `pnpm test` to do that.
 
-### Advanced Test: Selective Invalidation
+## The build boundary
 
-Modify the `add` method in `packages/ui/src/utils/add.ts`:
+```text
+App imports + complete UI sources
+             |
+       UiProjection, esbuild
+             |
+  App-specific ui_runtime tree
+             |
+  NextBuild, vercel build --standalone
+             |
+     .next + vercel_output.tar
+                    |
+           Playwright artifact tests
+                    |
+           vercel deploy --prebuilt
+```
+
+`UiProjection` follows imports into reachable UI components and bundles the
+utility barrel with only the requested exports. Unreachable component files
+never enter Next's input tree. Reachable React files retain their directives
+and contents. Utility module side effects remain, including effects in unused
+barrel branches and relative side-effect imports. The projection ignores
+`sideEffects: false` and `PURE` annotations when retaining those effects.
+
+An unused export edit reruns the projection. If it produces identical files,
+Bazel reuses the existing Next and Vercel output and cached browser test result.
+Next's output can be nondeterministic because no second Next build executes on
+that cache hit. No output normalization or developer-maintained semantic hashes
+control this decision.
+
+The tests run the generated Vercel function handlers and static files from an
+isolated copy. They check hydration, calculator updates, navigation, API calls
+and 404 responses. The local adapter implements this PoC's routes; a hosted
+preview still needs validation against Vercel's routing and environment.
+
+## Prove invalidation
 
 ```bash
-# Edit packages/ui/src/utils/add.ts (change the implementation)
-bun e2e:test
+# No pnpm install required; Bazel supplies the build tools.
+python3 scripts/prove-next-invalidation.py --remote --browser
 ```
 
-**Expected Result**:
+The proof changes only a disposable copy of the working tree. It checks actual
+`NextBuild` and `TestRunner` actions, compares complete intermediate and output
+trees and deployment archive bytes, and saves JSON evidence with execution logs.
 
-1. **Builds**: Both `web` and `docs` rebuild (cache miss - correct, as Turborepo tracks dependency changes)
-2. **Build Outputs**:
-   - `docs` build output changes (uses `add`)
-   - `web` build output remains identical (doesn't use `add`, tree-shaking removes it)
-3. **E2E Tests**:
-   - `docs-e2e` runs fresh (its `build.hash` changed)
-   - `web-e2e` uses cache (its `build.hash` unchanged)
+| Edit                                                | Web build and browser tests | Docs build and browser tests |
+| --------------------------------------------------- | --------------------------- | ---------------------------- |
+| Add or change an unreachable UI component           | Reused                      | Reused                       |
+| Change an unused export through the utility barrel  | Reused                      | Reused                       |
+| Change an unused export in the same module as `add` | Reused                      | Reused                       |
+| Change used `add`                                   | Execute                     | Reused                       |
+| Change used `sub`                                   | Reused                      | Execute                      |
+| Add or change a reachable module side effect        | Execute                     | Execute                      |
+| Start a fresh client with only HTTP cache access    | Cache hit                   | Cache hit                    |
+| Edit an unused export on another fresh client       | Cache hit                   | Cache hit                    |
 
-This demonstrates that even though both apps rebuild, only the app that actually uses the changed code has its test cache invalidated.
+The HTTP fixture uses separate producer and consumer Bazel output bases, no
+disk cache, and a consumer that cannot upload results. This tests the remote
+cache protocol locally. It does not establish access to a hosted cache provider.
+The expensive experiment runs for build-system changes, weekly, or manually.
+Follow-up PR commits compare against the previous head so ordinary app edits
+can skip the experiment.
 
-## How Barrel Files Work
+## Deployment and limits
 
-Barrel files (`index.ts`) re-export multiple modules from a single entry point. With proper tree-shaking:
+See [the setup guide](spec/BAZEL_DEPLOYMENT.md) for the shared cache, Vercel
+account and GitHub configuration. CI packages the tested Linux artifact and
+can deploy it without another build. Deployment stays disabled until the
+intended Vercel account, projects and credentials are configured.
 
-- **Without tree-shaking**: Importing `{ sub }` from `@repo/ui/utils` would bundle both `add` and `sub`
-- **With tree-shaking**: Only `sub` is included in the bundle, `add` is eliminated
+The selected shared cache is self-hosted on AWS. Its
+[EC2 and Docker setup](infra/bazel-cache/README.md) includes automatic HTTPS,
+separate reader/writer credentials and an acceptance test using fresh clients.
+AWS provisioning still needs an account and cache domain. Deployment reuse is
+implemented but still needs verification against the hosted Vercel projects.
 
-The key configuration enabling this:
+This remains a bounded PoC. It shakes utility exports, not individual exports
+inside reachable React component modules. Namespace imports retain all utility
+exports. Unsupported computed imports, asset lookups, utility leaf imports and
+shared UI styles fail explicitly. New app source directories, framework hooks,
+npm dependencies and Bazel subpackages can require build-rule changes.
+Build-time environment values and fetched content must become declared inputs
+before adding them to these apps. Full source type checks run separately in CI.
 
-1. **Package config** (`packages/ui/package.json`): `"sideEffects": false`
-2. **Next.js config**: `optimizePackageImports: ["@repo/ui"]`
-3. **Build tool**: Turbopack (`--turbo` flag) for production builds
-
-## Scripts
-
-- `bun e2e:test` - Runs builds, syncs build hashes, then runs e2e tests
-- `bun build` - Builds all apps and packages
-- `bun dev` - Starts development servers
-
-## Technical Details
-
-See `spec/OPTIMIZATION_PLAN.md` for the detailed implementation plan and rationale.
-See `spec/HASHING_STRATEGY.md` for the hashing strategy used to calculate the build hash..
+See [the evaluation](spec/BAZEL_EVALUATION.md) for evidence and remaining gaps.
+[The migration notes](spec/BAZEL_MIGRATION.md) describe the original graph.
+[The optimization plan](spec/OPTIMIZATION_PLAN.md) and
+[hashing strategy](spec/HASHING_STRATEGY.md) record the earlier Nx approach.

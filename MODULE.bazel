@@ -1,0 +1,63 @@
+"""Bóbr — Bazel build graph for the pnpm monorepo.
+
+The point of this file: drive the whole repo (apps/web, apps/docs, packages/ui,
+the e2e suites) through Bazel's content-addressed action graph so CI only re-runs
+the checks whose *inputs* actually changed — replacing the hand-rolled
+scripts/hash-build.ts output-hashing hack.
+
+Stack (versions verified against the Bazel Central Registry, mid-2026):
+  aspect_rules_js 3.2.2, aspect_rules_ts 3.8.11, rules_nodejs 6.7.4, Bazel 8.7.0.
+"""
+
+module(
+    name = "bobr",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "aspect_rules_js", version = "3.2.2")
+bazel_dep(name = "aspect_rules_ts", version = "3.8.11")
+bazel_dep(name = "rules_nodejs", version = "6.7.4")
+
+# --- Gazelle: auto-generate & verify BUILD files from the TS/JS import graph --
+# Aspect's JS/TS Gazelle "language", shipped as a prebuilt binary so we don't
+# need a Rust/cgo/LLVM toolchain to build it from source. dev_dependency: it only
+# authors/checks BUILD files (at dev time and in CI) — it is never part of what
+# the apps themselves build, so it stays out of the production action graph.
+bazel_dep(name = "aspect_gazelle_prebuilt", version = "0.0.20", dev_dependency = True)
+
+# --- Node toolchain ---------------------------------------------------------
+# Use the same pinned Node version in Bazel, local development and CI.
+# scripts/update-node.mjs retrieves official checksums for all supported hosts.
+include("//tools/bazel:node.MODULE.bazel")
+
+# --- Consume the existing pnpm-lock.yaml ------------------------------------
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    pnpm_lock = "//:pnpm-lock.yaml",
+    npmrc = "//:.npmrc",
+    # Native packages with install lifecycle scripts need relaxed sandboxing.
+    lifecycle_hooks_execution_requirements = {
+        "*": ["no-sandbox"],
+    },
+)
+use_repo(npm, "npm")
+
+# pnpm itself (used for `bazel run @pnpm//:pnpm` lockfile maintenance).
+pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
+use_repo(pnpm, "pnpm")
+
+# --- TypeScript version for ts_project --------------------------------------
+# Match the repo's TypeScript 6.0.3 so Bazel's tsc agrees with pnpm/Nx tsc.
+rules_ts_ext = use_extension(
+    "@aspect_rules_ts//ts:extensions.bzl",
+    "ext",
+    dev_dependency = True,
+)
+rules_ts_ext.deps(
+    ts_version_from = "//:package.json",
+)
+use_repo(rules_ts_ext, "npm_typescript")
+
+chromium_repository = use_repo_rule("//tools/bazel:chromium.bzl", "chromium_repository")
+chromium_repository(name = "chromium")

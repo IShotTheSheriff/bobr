@@ -2,25 +2,30 @@
   "name": "turbo-2",
   "private": true,
   "scripts": {
-    "build": "turbo run build --output-logs=new-only",
-    "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "e2e:test": "turbo run build --output-logs=new-only && bun scripts/hash-build.ts && turbo run e2e:test",
-    "ci:affected": "bun scripts/ci-affected.ts",
+    "build": "python3 scripts/bazel.py build //...",
+    "dev": "nx run-many -t dev",
+    "lint": "nx run-many -t lint",
+    "check-types": "nx run-many -t check-types",
+    "e2e:test": "python3 scripts/bazel.py test //packages/web-e2e:test //packages/docs-e2e:test",
+    "ci:affected": "tsx scripts/ci-affected.ts",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "test:bazel-next": "python3 scripts/prove-next-invalidation.py --remote --browser",
+    "test": "python3 scripts/bazel.py test //..."
   },
   "devDependencies": {
-    "prettier": "3.7.4",
-    "turbo": "2.6.3",
-    "typescript": "5.9.3",
-    "@types/bun": "1.3.4",
-    "@types/node": "24.10.3"
+    "@nx/eslint": "22.7.5",
+    "@nx/js": "22.7.5",
+    "@nx/next": "22.7.5",
+    "@types/node": "25.9.3",
+    "esbuild": "0.28.1",
+    "nx": "22.7.5",
+    "prettier": "3.8.4",
+    "tar": "7.5.22",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3",
+    "vercel": "^61.0.0"
   },
-  "engines": {
-    "bun": ">=1.3.4"
-  },
-  "packageManager": "bun@1.3.4",
+  "packageManager": "pnpm@11.7.0",
   "workspaces": [
     "apps/*",
     "packages/*"

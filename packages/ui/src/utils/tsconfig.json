@@ -1,0 +1,14 @@
+{
+  "//": "tsconfig for the Bazel TS layer (the cached CI checks), NOT how Next consumes @repo/ui. Next compiles the .ts source itself via transpilePackages; this config only governs the `ts_project` leaves that produce the node-runnable unit-check outputs. Standalone (no `extends`) so each compile action's input set stays minimal, and commonjs/node so the emitted .js runs directly under node:test with no package.json \"type\" gymnastics. Gazelle reads `declaration` from here, so the rule attr isn't needed.",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "ignoreDeprecations": "6.0",
+    "target": "es2022",
+    "esModuleInterop": true,
+    "strict": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "declaration": true
+  }
+}

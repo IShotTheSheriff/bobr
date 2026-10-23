@@ -1,0 +1,18 @@
+{
+  "name": "@repo/docs-e2e",
+  "targets": {
+    "e2e:test": {
+      "command": "pnpm exec playwright test",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "inputs": [
+        "{projectRoot}/src/**",
+        "{projectRoot}/build.hash",
+        "{projectRoot}/playwright.config.ts"
+      ],
+      "cache": true
+    }
+  },
+  "implicitDependencies": ["docs"]
+}

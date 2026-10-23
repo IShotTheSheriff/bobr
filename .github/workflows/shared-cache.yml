@@ -1,0 +1,36 @@
+name: Shared cache acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/bazel'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE }}
+      BAZEL_REMOTE_WRITE_HEADER: ${{ secrets.BAZEL_REMOTE_WRITE_HEADER }}
+      BAZEL_REMOTE_READ_HEADER: ${{ secrets.BAZEL_REMOTE_READ_HEADER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install Bazelisk and browser system libraries
+        run: |
+          npm install -g @bazel/bazelisk
+          npx --yes playwright@1.61.0 install-deps chromium
+      - name: Verify fresh clients and an unused-export commit
+        run: |
+          python3 scripts/verify-cache-access.py
+          python3 scripts/verify-shared-cache.py --directory "${{ runner.temp }}/shared-cache-proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shared-cache-evidence
+          path: ${{ runner.temp }}/shared-cache-proof/results.json
+          if-no-files-found: ignore

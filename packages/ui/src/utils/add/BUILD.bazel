@@ -1,0 +1,18 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+
+ts_project(
+    name = "add",
+    srcs = ["index.ts"],
+    declaration = True,
+    tsconfig = "//packages/ui/src/utils:tsconfig",
+    visibility = ["//visibility:public"],
+)
+
+# Raw .ts source re-exposed so the parent package's `:srcs` filegroup can collect
+# it across this package boundary (the @repo/ui npm_package ships the source).
+# keep
+filegroup(
+    name = "srcs",
+    srcs = glob(["*.ts"]),
+    visibility = ["//packages/ui:__subpackages__"],
+)

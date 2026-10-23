@@ -1,0 +1,42 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library", "js_test")
+
+js_binary(
+    name = "project_ui",
+    entry_point = "project-ui.cjs",
+    data = ["//:node_modules/esbuild", "//:node_modules/typescript"],
+    visibility = ["//visibility:public"],
+)
+
+js_test(
+    name = "project_ui_test",
+    entry_point = "project-ui.test.cjs",
+    data = ["project-ui.cjs", "//:node_modules/esbuild", "//:node_modules/typescript"],
+)
+
+js_binary(
+    name = "build_next",
+    entry_point = "build-next.cjs",
+    data = ["trace-fs.cjs", "check-artifact.cjs", "//:node_modules/vercel", "//:node_modules/tar"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["chromium-pins.json", "run-playwright.cjs", "artifact-server.cjs", "check-artifact.cjs"])
+
+config_setting(
+    name = "production",
+    define_values = {"deploy_env": "production"},
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "artifact_helpers",
+    srcs = ["artifact-server.cjs", "check-artifact.cjs"],
+    deps = ["//:node_modules/tar"],
+    visibility = ["//visibility:public"],
+)
+js_library(
+    name = "test_runner",
+    srcs = ["run-playwright.cjs"],
+    deps = [":artifact_helpers"],
+    visibility = ["//visibility:public"],
+)

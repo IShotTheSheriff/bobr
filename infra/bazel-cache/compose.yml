@@ -1,0 +1,50 @@
+name: bobr-cache
+
+services:
+  cache:
+    image: buchgr/bazel-remote-cache:v2.6.2@sha256:8109f1f39eb17d898cf51e08b41e4eabaaaeb1f584c2f22c1be45b7568fcc512
+    command:
+      - --dir=/data
+      - --max_size=${CACHE_SIZE_GIB:-50}
+      - --http_address=0.0.0.0:8080
+      - --grpc_address=none
+      - --access_log_level=none
+    volumes:
+      - cache-data:/data
+    networks: [backend]
+    restart: unless-stopped
+    logging:
+      driver: local
+
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    environment:
+      CACHE_DOMAIN: ${CACHE_DOMAIN:?Run configure.py with the cache domain first}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    secrets: [cache_users]
+    networks: [frontend, backend]
+    depends_on: [cache]
+    restart: unless-stopped
+    logging:
+      driver: local
+
+networks:
+  frontend:
+  # The unauthenticated backend has no published port or Internet route.
+  backend:
+    internal: true
+
+volumes:
+  cache-data:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  cache_users:
+    file: ./.secrets/cache-users

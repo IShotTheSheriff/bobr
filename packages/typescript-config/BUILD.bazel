@@ -1,0 +1,8 @@
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+
+# First-party workspace package `@repo/typescript-config` (shared tsconfig bases).
+npm_package(
+    name = "pkg",
+    srcs = glob(["*.json"]),
+    visibility = ["//visibility:public"],
+)

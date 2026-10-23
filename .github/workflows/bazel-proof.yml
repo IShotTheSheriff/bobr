@@ -1,0 +1,50 @@
+name: Bazel invalidation proof
+
+# This experiment deliberately builds changed fixtures with a fresh cache.
+# Ordinary application commits use the cached build and test workflow.
+on:
+  push:
+    branches: ["main", "bazel"]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  invalidation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check whether this update needs the proof
+        id: changes
+        run: python3 scripts/next-proof-trigger.py
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.required == 'true'
+        with:
+          node-version-file: .nvmrc
+      - run: npm install -g @bazel/bazelisk
+        if: steps.changes.outputs.required == 'true'
+      - name: Install browser system libraries
+        if: steps.changes.outputs.required == 'true'
+        run: npx --yes playwright@1.61.0 install-deps chromium
+      - name: Prove unused exports skip Next and Playwright
+        if: steps.changes.outputs.required == 'true'
+        run: python3 scripts/prove-next-invalidation.py --remote --browser --directory "${{ runner.temp }}/bobr-next-proof"
+      - name: Save action evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-invalidation-evidence
+          path: |
+            ${{ runner.temp }}/bobr-next-proof/results.json
+            ${{ runner.temp }}/bobr-next-proof/remote-cache-evidence.json
+            ${{ runner.temp }}/bobr-next-proof/*.log
+            ${{ runner.temp }}/bobr-next-proof/*.actions.json
+          if-no-files-found: ignore

@@ -1,0 +1,7 @@
+# Bazel 8+ replacement for .bazelignore: keep Bazel from globbing the giant pnpm
+# node_modules trees. rules_js manages node_modules itself under bazel-bin.
+ignore_directories([
+    "**/node_modules",
+    ".nx",
+    ".next",
+])

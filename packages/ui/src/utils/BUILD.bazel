@@ -1,0 +1,44 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+
+# Gazelle owns the per-directory `ts_project` leaf targets in this subtree — the
+# realistic, automated form of the per-file granularity the PoC started with.
+# Each sibling module directory (add/, sub/) becomes its OWN target, so a
+# consumer that depends on one never has the other in its action inputs.
+# gazelle:js enabled
+# The leaves are consumed by the app harnesses in //apps/*, so generate them
+# public (matches the original hand-written leaf targets). Set via directive so
+# `gazelle.check` stays idempotent — a hand-added visibility would be stripped.
+# gazelle:js_visibility //visibility:public
+
+# Raw .ts sources of this package AND its per-module sub-packages, aggregated and
+# exposed so the parent @repo/ui npm_package can ship them. A glob can't cross a
+# package boundary, so each sub-package re-exposes its own `:srcs` and we collect
+# them here. Hand-authored (Gazelle's js language doesn't manage filegroups); the
+# `# keep` pins it so a Gazelle run never drops it.
+# keep
+filegroup(
+    name = "srcs",
+    srcs = glob(["*.ts"]) + [
+        "//packages/ui/src/utils/add:srcs",
+        "//packages/ui/src/utils/sub:srcs",
+    ],
+    visibility = ["//packages/ui:__pkg__"],
+)
+
+ts_project(
+    name = "utils",
+    srcs = ["index.ts"],
+    declaration = True,
+    tsconfig = ":tsconfig",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//packages/ui/src/utils/add",
+        "//packages/ui/src/utils/sub",
+    ],
+)
+
+ts_config(
+    name = "tsconfig",
+    src = "tsconfig.json",
+    visibility = [":__subpackages__"],
+)

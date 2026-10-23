@@ -1,0 +1,27 @@
+# --- Local cross-invocation cache (the PoC's proof of reuse) ---------------
+# A persistent disk cache so cache hits survive across separate `bazel` runs —
+# the same role a remote cache plays in CI. This is what lets us prove
+# "change add/index.ts -> docs targets are restored from cache, not re-run".
+build --disk_cache=.bazel-cache
+
+# --- Output / UX ------------------------------------------------------------
+common --color=yes
+build --show_result=20
+test --test_output=errors
+
+# --- TypeScript -------------------------------------------------------------
+# Use tsc as the ts_project transpiler (transpile + type-check in one action).
+# Simplest correct choice; swc would add per-file parallelism but isn't needed
+# for a 2-app PoC.
+common --@aspect_rules_ts//ts:default_to_tsc_transpiler
+
+# --- Hermeticity ------------------------------------------------------------
+# Don't leak the host's full environment into actions; only declared env is used.
+build --incompatible_strict_action_env
+
+# Surface why something rebuilt when diagnosing cache behaviour (off by default;
+# enable per-invocation with --explain=... --verbose_explanations).
+
+# Shared-cache endpoint and credentials come from scripts/bazel.py.
+# pnpm build/test and CI use that wrapper. Direct bazel calls use the disk cache.
+# Shared cache reads are the default; trusted writers set BAZEL_REMOTE_UPLOAD=1.

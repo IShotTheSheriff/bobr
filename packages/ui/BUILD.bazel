@@ -1,0 +1,17 @@
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
+
+# First-party workspace package `@repo/ui`. Required so that
+# npm_link_all_packages() can link the workspace:* dependency that apps/web and
+# apps/docs declare. @repo/ui is a *source* package (its exports map points at
+# src/*.tsx and src/utils/*.ts); consumers' bundlers compile the TypeScript.
+npm_package(
+    name = "pkg",
+    srcs = ["package.json"] + glob(["src/**/*"]) + [
+        # src/utils/ is its own Bazel package, so the glob above can't reach it.
+        "//packages/ui/src/utils:srcs",
+    ],
+    visibility = ["//visibility:public"],
+)

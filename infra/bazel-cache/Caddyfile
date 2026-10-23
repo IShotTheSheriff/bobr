@@ -1,0 +1,30 @@
+{
+	admin off
+}
+
+{$CACHE_DOMAIN} {
+	route {
+		# Authenticate before evaluating the writer identity.
+		basic_auth {
+			import /run/secrets/cache_users
+		}
+
+		@invalid not path_regexp ^/(ac|cas)/[a-f0-9]{64}$
+		respond @invalid 404
+
+		@read method GET HEAD
+		reverse_proxy @read cache:8080 {
+			header_up -Authorization
+		}
+
+		@write {
+			method PUT
+			expression `{http.auth.user.id} == "writer"`
+		}
+		reverse_proxy @write cache:8080 {
+			header_up -Authorization
+		}
+
+		respond "Read-only credential or unsupported method" 403
+	}
+}

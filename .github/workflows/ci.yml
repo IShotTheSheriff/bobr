@@ -1,49 +1,166 @@
-name: CI
+name: CI (Bazel)
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "bazel"]
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
 
 jobs:
-  e2e:
-    name: E2E Tests
-    timeout-minutes: 60
+  bazel:
+    name: Build & test (Bazel)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: .
+    timeout-minutes: 30
+    concurrency:
+      group: bazel-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
-      NEXT_PUBLIC_BOBR_WEB_URL: http://localhost:3000
-      NEXT_PUBLIC_BOBR_DOCS_URL: http://localhost:3001
-
+      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE }}
+      # Only trusted pushes get writer credentials. PRs require a backend-enforced
+      # read-only credential; fork PRs receive no secrets from GitHub.
+      BAZEL_REMOTE_HEADER: ${{ github.event_name == 'push' && secrets.BAZEL_REMOTE_WRITE_HEADER || secrets.BAZEL_REMOTE_READ_HEADER }}
+      BAZEL_REMOTE_UPLOAD: ${{ github.event_name == 'push' && '1' || '0' }}
+      DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
+      - name: Check CI helper behavior
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2.0.2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install Playwright Browsers
-        run: bunx playwright install --with-deps
-
-      - name: Run E2E Tests
-        # This runs the smart test runner: build -> hash-check -> test (affected only)
+          node-version-file: .nvmrc
+      - name: Check deployment reuse behavior
+        run: node --test scripts/test_vercel_reuse.cjs
+      - name: Install Bazelisk and browser system libraries
         run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            export TURBO_BASE="origin/${{ github.base_ref }}"
-          else
-            export TURBO_BASE="HEAD^1"
+          npm install -g @bazel/bazelisk
+          npx --yes playwright@1.61.0 install-deps chromium
+      - name: Configure cache access
+        env:
+          PUBLIC_CACHE: ${{ vars.BAZEL_REMOTE_PUBLIC_READ }}
+        run: |
+          if [ -z "$BAZEL_REMOTE_HEADER" ] && [ "$PUBLIC_CACHE" != "1" ]; then
+            echo 'BAZEL_REMOTE_CACHE=' >> "$GITHUB_ENV"
           fi
-          echo "Using TURBO_BASE=$TURBO_BASE"
-          bun run ci:affected
+      - name: Restore Bazel disk and downloads
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .bazel-cache
+            ~/.bazel-repo
+          key: bazel-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel.lock', 'pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel.lock', 'pnpm-lock.yaml') }}-
+            bazel-${{ runner.os }}-${{ runner.arch }}-
+            bazel-${{ runner.os }}-
+      - name: Build and test deployable artifacts
+        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET"
+      - name: Save successful build cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .bazel-cache
+            ~/.bazel-repo
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Package the tested artifacts
+        run: |
+          mkdir -p artifacts
+          for app in web docs; do
+            cp "bazel-bin/apps/$app/vercel_output.tar" "artifacts/$app.tar"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vercel-output
+          path: artifacts/*.tar
+          retention-days: 7
+      # Production and preview have separate action keys. Warm preview only after
+      # archiving production so deployment still receives the tested production output.
+      - name: Populate preview cache from trusted main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define=deploy_env=preview
+      - name: Save preview cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .bazel-cache
+            ~/.bazel-repo
+          key: ${{ steps.cache.outputs.cache-primary-key }}-preview
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-evidence
+          path: bazel-testlogs/packages/*-e2e/test/
+          if-no-files-found: ignore
+
+  typecheck:
+    name: Application type checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: typecheck-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter web --filter docs --filter @repo/ui check-types
+
+  deploy:
+    name: Deploy tested ${{ matrix.app }} artifact
+    needs: [bazel, typecheck]
+    # Enable after configuring the account. Fork PRs never receive deployment
+    # credentials. The bazel branch preview deploys on push to avoid duplicates.
+    if: >-
+      vars.VERCEL_DEPLOY_ENABLED == '1' &&
+      (github.event_name == 'push' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.head_ref != 'bazel'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        app: [web, docs]
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ github.ref }}-${{ matrix.app }}
+      cancel-in-progress: false
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: vercel-output
+          path: artifacts
+      - name: Check that this commit is still current
+        id: current
+        run: |
+          latest=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
+          if [ "$latest" = "$GITHUB_SHA" ]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Skipping deployment for a superseded or deleted ref.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Deploy without rebuilding
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          APP: ${{ matrix.app }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ matrix.app == 'web' && vars.VERCEL_WEB_PROJECT_ID || vars.VERCEL_DOCS_PROJECT_ID }}
+          DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+          DEPLOY_SCOPE: ${{ github.repository }}:${{ github.ref }}
+          VERCEL_FORCE_DEPLOY: ${{ vars.VERCEL_FORCE_DEPLOY }}
+        run: node scripts/deploy-vercel.cjs "artifacts/$APP.tar" "$DEPLOY_TARGET"

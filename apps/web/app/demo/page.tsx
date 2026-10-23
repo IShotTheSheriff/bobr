@@ -279,7 +279,7 @@ export default function DemoPage() {
           <div className="mt-8 p-4 bg-black/40 rounded-xl border border-white/10 backdrop-blur-sm">
             <p className="text-zinc-400 mb-2 text-sm">Shared UI Component:</p>
             <Code className="bg-[#1a1d26] px-4 py-2 rounded-lg text-[#375BD2] font-mono">
-              console.log("Hello from Bóbr!");
+              console.log(&quot;Hello from Bóbr!&quot;);
             </Code>
           </div>
         </div>

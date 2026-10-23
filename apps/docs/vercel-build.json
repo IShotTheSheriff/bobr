@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "nodeVersion": "24.x",
+  "installCommand": "",
+  "buildCommand": "node node_modules/next/dist/bin/next build --webpack"
+}

@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Bóbr cache VM with HTTPS ingress, SSM access and persistent encrypted storage
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.small, t3.medium, t3.large]
+  CacheDiskGiB:
+    Type: Number
+    Default: 100
+    MinValue: 80
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.83.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+  Gateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Gateway
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.83.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  Route:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Gateway
+  RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet
+      RouteTableId: !Ref RouteTable
+  Firewall:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS cache and HTTP certificate validation only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Role]
+  Data:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AvailabilityZone: !GetAtt Subnet.AvailabilityZone
+      Encrypted: true
+      VolumeType: gp3
+      Size: !Ref CacheDiskGiB
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-data
+  Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: [Route, RouteAssociation]
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Profile
+      SubnetId: !Ref Subnet
+      SecurityGroupIds: [!Ref Firewall]
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 16
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-cache
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          dnf install -y docker git python3
+          volume_id=$(echo '${Data}' | tr -d '-')
+          device="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$volume_id"
+          for attempt in $(seq 1 120); do
+            test -b "$device" && break
+            sleep 2
+          done
+          test -b "$device"
+          if ! blkid "$device"; then
+            mkfs.xfs "$device"
+          fi
+          mkdir -p /srv/bobr-cache
+          uuid=$(blkid -s UUID -o value "$device")
+          echo "UUID=$uuid /srv/bobr-cache xfs defaults 0 2" >> /etc/fstab
+          mount /srv/bobr-cache
+          mkdir -p /etc/docker /etc/systemd/system/docker.service.d
+          echo '{"data-root":"/srv/bobr-cache/docker"}' > /etc/docker/daemon.json
+          printf '[Unit]\nRequiresMountsFor=/srv/bobr-cache\n' > /etc/systemd/system/docker.service.d/storage.conf
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          cd /usr/local/lib/docker/cli-plugins
+          curl --fail --location --retry 3 -o docker-compose https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-x86_64
+          curl --fail --location --retry 3 -o compose.sha256 https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-x86_64.sha256
+          expected=$(cut -d ' ' -f1 compose.sha256)
+          echo "$expected  docker-compose" | sha256sum --check
+          rm compose.sha256
+          chmod 755 docker-compose
+          systemctl daemon-reload
+          systemctl enable --now docker
+          touch /srv/bobr-cache/bootstrap-complete
+  Attachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref Instance
+      VolumeId: !Ref Data
+  Address:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
+    Properties:
+      Domain: vpc
+  AddressAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt Address.AllocationId
+      InstanceId: !Ref Instance
+  InstanceHealth:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Cache VM failed its EC2 status check. Add an SNS action for notifications.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Instance
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: breaching
+
+Outputs:
+  PublicIp:
+    Description: Point the cache domain A record here
+    Value: !Ref Address
+  InstanceId:
+    Value: !Ref Instance
+  DataVolumeId:
+    Description: Retained and billed after stack deletion until explicitly removed
+    Value: !Ref Data
+  SessionCommand:
+    Value: !Sub aws ssm start-session --target ${Instance} --region ${AWS::Region}

@@ -20,6 +20,10 @@ test-results/
 # Turbo
 .turbo
 
+# Nx
+.nx/cache
+.nx/workspace-data
+
 # Vercel
 .vercel
 
@@ -38,3 +42,17 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Bazel (bazel-out, bazel-bin, bazel-testlogs, bazel-<workspace> convenience symlinks)
+/bazel-*
+.bazel-cache
+# Remote-cache credentials, loaded via `try-import` in .bazelrc — never commit.
+# (The .bazelrc.auth.example template IS committed.)
+.bazelrc.auth
+
+.claude/worktrees
+.nx/polygraph
+.nx/self-healing
+
+# Python test imports
+__pycache__/
