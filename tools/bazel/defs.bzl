@@ -4,25 +4,29 @@ load("@aspect_rules_js//js:defs.bzl", "js_run_binary", "js_test")
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("@npm//:defs.bzl", "npm_link_targets")
 
-# Files in an app package that never affect `next build`. Every other file is an
+# Files in an app package that no build or check reads. Every other file is an
 # input, so new source folders, configs and .env files need no rule changes.
 # Markdown pages (`pageExtensions`) would need "**/*.md" removed from this list.
-_NOT_BUILD_INPUTS = [
+_NOT_SOURCES = [
     "**/*.md",
-    "**/*.test.*",
     "**/.gitignore",
     "BUILD.bazel",
     "eslint.config.*",
     "next-env.d.ts",
     "*.tsbuildinfo",
+    "tsconfig.bazel-typecheck.json",
     "node_modules/**",
     ".next/**",
     ".vercel/**",
     "vercel_output/**",
     "ui_runtime/**",
+    "ui_types/**",
     "out/**",
     "coverage/**",
 ]
+
+# Tests are type-checked but never part of `next build`.
+_NOT_BUILD_INPUTS = _NOT_SOURCES + ["**/*.test.*"]
 
 # The projection replaces @repo/ui, and `next build` does not run ESLint.
 _NOT_BUILD_DEPS = ["@repo/ui", "@repo/eslint-config", "eslint"]
@@ -37,23 +41,32 @@ def next_app():
     adding pages, folders or npm packages needs no BUILD changes.
     """
     package = native.package_name()
+    checked = native.glob(["**/*"], exclude = _NOT_SOURCES)
     sources = native.glob(["**/*"], exclude = _NOT_BUILD_INPUTS)
     links = npm_link_targets()
     deps = [dep for dep in links if _dep_name(dep) not in _NOT_BUILD_DEPS]
 
     # The projection reads tsconfig `paths`, which can come from an extended config.
+    tsconfig_deps = [dep for dep in deps if _dep_name(dep) == "@repo/typescript-config"]
     js_run_binary(
         name = "ui_projection",
-        srcs = sources + ["//packages/ui:pkg"] + [
-            dep
-            for dep in deps
-            if _dep_name(dep) == "@repo/typescript-config"
-        ],
+        srcs = sources + ["//packages/ui:pkg"] + tsconfig_deps,
         args = [package, "$(rootpath //packages/ui:pkg)", package + "/ui_runtime"],
         out_dirs = ["ui_runtime"],
         mnemonic = "UiProjection",
         tool = "//tools/bazel:project_ui",
     )
+
+    # Components and utility declarations the app's own code and tests reach.
+    js_run_binary(
+        name = "ui_types",
+        srcs = checked + ["//packages/ui:pkg"] + tsconfig_deps,
+        args = ["--types", package, "$(rootpath //packages/ui:pkg)", package + "/ui_types"],
+        out_dirs = ["ui_types"],
+        mnemonic = "UiTypes",
+        tool = "//tools/bazel:project_ui",
+    )
+    typecheck(srcs = checked + deps + [":ui_types"], ui_types = package + "/ui_types")
 
     # Next consumes the generated UI tree. Identical projection bytes reuse the
     # cached Next artifact even though a fresh Next build is not reproducible.
@@ -87,6 +100,21 @@ def next_app():
         name = "pkg",
         srcs = sources,
         visibility = ["//visibility:public"],
+    )
+
+def typecheck(srcs, ui_types = None):
+    """Type-checks the calling package with its tsconfig.json as a cached test.
+
+    Args:
+      srcs: the package's files and the npm links its types come from.
+      ui_types: the app's projected UI types, which replace @repo/ui sources.
+    """
+    package = native.package_name()
+    js_test(
+        name = "typecheck",
+        entry_point = "//tools/bazel:typecheck",
+        data = srcs,
+        args = [package] + ([ui_types] if ui_types else []),
     )
 
 def unit_tests(srcs):

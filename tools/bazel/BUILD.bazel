@@ -47,3 +47,8 @@ js_library(
     deps = [":artifact_helpers"],
     visibility = ["//visibility:public"],
 )
+js_library(
+    name = "typecheck",
+    srcs = ["typecheck.cjs"],
+    visibility = ["//visibility:public"],
+)

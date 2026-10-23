@@ -1,6 +1,6 @@
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("@npm//:defs.bzl", "npm_link_all_packages", "npm_link_targets")
-load("//tools/bazel:defs.bzl", "unit_tests")
+load("//tools/bazel:defs.bzl", "typecheck", "unit_tests")
 
 npm_link_all_packages()
 
@@ -15,3 +15,5 @@ npm_package(
 )
 
 unit_tests(srcs = SOURCES + npm_link_targets())
+
+typecheck(srcs = ["package.json", "tsconfig.json"] + glob(["src/**/*"]) + npm_link_targets())
