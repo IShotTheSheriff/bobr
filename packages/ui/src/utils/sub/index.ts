@@ -1,3 +1,4 @@
 export const sub = (a: number) => {
-  return a - 5;
+  const offset = 5;
+  return a - offset;
 };
