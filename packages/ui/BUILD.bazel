@@ -1,6 +1,6 @@
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
-load("@npm//:defs.bzl", "npm_link_all_packages", "npm_link_targets")
-load("//tools/bazel:defs.bzl", "lint", "typecheck", "unit_tests")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//tools/bazel:defs.bzl", "lint", "package_deps", "typecheck", "unit_tests")
 
 npm_link_all_packages()
 
@@ -14,8 +14,8 @@ npm_package(
     visibility = ["//visibility:public"],
 )
 
-unit_tests(srcs = SOURCES + npm_link_targets())
+unit_tests(srcs = SOURCES + package_deps())
 
-typecheck(srcs = ["package.json", "tsconfig.json"] + glob(["src/**/*"]) + npm_link_targets())
+typecheck(srcs = ["package.json", "tsconfig.json"] + glob(["src/**/*"]) + package_deps())
 
-lint(srcs = ["eslint.config.mjs", "package.json"] + glob(["src/**/*"]) + npm_link_targets())
+lint(srcs = ["eslint.config.mjs", "package.json"] + glob(["src/**/*"]) + package_deps(lint = True))

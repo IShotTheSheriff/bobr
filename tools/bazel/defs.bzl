@@ -28,11 +28,23 @@ _NOT_SOURCES = [
 # Tests are type-checked but never part of `next build`.
 _NOT_BUILD_INPUTS = _NOT_SOURCES + ["**/*.test.*"]
 
-# The projection replaces @repo/ui, and `next build` does not run ESLint.
-_NOT_BUILD_DEPS = ["@repo/ui", "@repo/eslint-config", "eslint"]
+# Only the lint check loads ESLint and the shared config.
+_LINT_ONLY_DEPS = ["@repo/eslint-config", "eslint"]
 
 def _dep_name(label):
     return label.rsplit(":node_modules/", 1)[1]
+
+def package_deps(lint = False):
+    """Returns the calling package's npm links from pnpm-lock.yaml.
+
+    Args:
+      lint: keep ESLint and the shared ESLint config, which only lint reads.
+    """
+    return [
+        dep
+        for dep in npm_link_targets()
+        if lint or _dep_name(dep) not in _LINT_ONLY_DEPS
+    ]
 
 def next_app():
     """Builds, tests and archives the Next app in the calling package.
@@ -43,8 +55,10 @@ def next_app():
     package = native.package_name()
     checked = native.glob(["**/*"], exclude = _NOT_SOURCES)
     sources = native.glob(["**/*"], exclude = _NOT_BUILD_INPUTS)
-    links = npm_link_targets()
-    deps = [dep for dep in links if _dep_name(dep) not in _NOT_BUILD_DEPS]
+    links = package_deps()
+
+    # The projection replaces @repo/ui for the build and the type check.
+    deps = [dep for dep in links if _dep_name(dep) != "@repo/ui"]
 
     # The projection reads tsconfig `paths`, which can come from an extended config.
     tsconfig_deps = [dep for dep in deps if _dep_name(dep) == "@repo/typescript-config"]
@@ -71,7 +85,7 @@ def next_app():
     # ESLint reads no @repo/ui source, so UI edits never rerun an app's lint.
     lint(srcs = checked + native.glob(["eslint.config.*"]) + [
         dep
-        for dep in links
+        for dep in package_deps(lint = True)
         if _dep_name(dep) != "@repo/ui"
     ])
 
