@@ -315,3 +315,85 @@ test("app imports outside the app package fail explicitly", async (t) => {
   t.after(() => fs.rmSync(path.join(path.dirname(root), "elsewhere.ts"), { force: true }));
   await assert.rejects(f.run(), /outside declared app\/UI sources/);
 });
+
+const { projectUiTypes } = projectUi;
+
+function typesFixture(t, appSource, sources) {
+  const f = fixture(t, appSource, sources["utils/index.ts"] || "");
+  for (const [file, content] of Object.entries(sources)) {
+    const target = path.join(f.source, "src", file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, content);
+  }
+  const output = path.join(path.dirname(f.output), "types");
+  return {
+    ...f,
+    types: output,
+    run: () => projectUiTypes(path.dirname(f.app), f.source, output),
+  };
+}
+
+test("the type view declares only the utility exports the app names", async (t) => {
+  const f = typesFixture(t, 'import { add } from "@repo/ui/utils"; add(1);', {
+    "utils/index.ts":
+      'export { add } from "./add"; export { sub } from "./sub";',
+    "utils/add/index.ts": "export const add = (a: number) => a + 1;",
+    "utils/sub/index.ts": "export const sub = (a: number) => a - 1;",
+  });
+  f.run();
+  assert.equal(
+    fs.readFileSync(path.join(f.types, "utils/index.d.ts"), "utf8"),
+    'export { add } from "./__declarations__/add/index";\n',
+  );
+  const declarations = files(path.join(f.types, "utils/__declarations__"));
+  assert.deepEqual(declarations, ["add/index.d.ts"]);
+  const before = fs.readFileSync(
+    path.join(f.types, "utils/__declarations__/add/index.d.ts"),
+    "utf8",
+  );
+  // A body change keeps the declaration, so the app's type check stays cached.
+  fs.writeFileSync(
+    path.join(f.source, "src/utils/add/index.ts"),
+    "export const add = (a: number) => { const step = 1; return a + step; };",
+  );
+  f.run();
+  assert.equal(
+    fs.readFileSync(path.join(f.types, "utils/__declarations__/add/index.d.ts"), "utf8"),
+    before,
+  );
+});
+
+test("the type view follows renamed barrel exports", async (t) => {
+  const f = typesFixture(t, 'import { plus } from "@repo/ui/utils"; plus(1);', {
+    "utils/index.ts": 'export { add as plus } from "./add";',
+    "utils/add/index.ts": "export const add = (a: number) => a + 1;",
+  });
+  f.run();
+  assert.equal(
+    fs.readFileSync(path.join(f.types, "utils/index.d.ts"), "utf8"),
+    'export { add as plus } from "./__declarations__/add/index";\n',
+  );
+});
+
+test("type-only imports reach the type view but not the runtime projection", async (t) => {
+  const f = typesFixture(
+    t,
+    'import type { Props } from "@repo/ui/widget"; export const props: Props = {};',
+    { "widget.tsx": "export type Props = {}; export const Widget = () => null;" },
+  );
+  f.run();
+  await projectUi(path.dirname(f.app), f.source, f.output);
+  assert.ok(fs.existsSync(path.join(f.types, "widget.tsx")));
+  assert.ok(!fs.existsSync(path.join(f.output, "widget.tsx")));
+});
+
+function files(dir, prefix = "") {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) =>
+      e.isDirectory()
+        ? files(path.join(dir, e.name), prefix + e.name + "/")
+        : [prefix + e.name],
+    )
+    .sort();
+}

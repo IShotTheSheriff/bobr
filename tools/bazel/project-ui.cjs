@@ -71,7 +71,7 @@ function checkExports(source) {
 
 // Follows imports from Next's entry files into the UI package. With `types`,
 // type-only imports count too: the type check needs them, the runtime does not.
-function trace(app, source, { types = false } = {}) {
+function trace(app, source, { types = false, output } = {}) {
   checkExports(source);
   const utils = path.join(source, "src/utils");
   const uiRoot = path.join(source, "src");
@@ -81,10 +81,12 @@ function trace(app, source, { types = false } = {}) {
   const reachable = new Set();
   // tsc checks every script the tsconfig includes, tests among them, so the
   // type view starts from all of them.
+  const generated = [source, output].filter(Boolean);
   const queue = types
     ? files(app).filter(
         (file) =>
           /\.[cm]?[jt]sx?$/.test(file) &&
+          !generated.some((dir) => file.startsWith(dir + path.sep)) &&
           !path
             .relative(app, file)
             .split(path.sep)
@@ -499,7 +501,7 @@ function utilityDeclarations(utils, names, wholeNamespace) {
 // The view the app's type check compiles against: reachable components,
 // including type-only imports, and declarations for the named utilities.
 function projectUiTypes(app, source, output) {
-  const traced = trace(app, source, { types: true });
+  const traced = trace(app, source, { types: true, output });
   copyReachable(traced, output);
   const { utils, names, wholeNamespace, imported } = traced;
   if (!imported) return;

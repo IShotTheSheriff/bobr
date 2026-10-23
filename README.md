@@ -121,6 +121,8 @@ run.
 
 Any edit to `packages/ui` also reruns that package's own type check and lint.
 Unit tests in `packages/ui` rerun only when the module they test changes.
+GitHub Actions runs on fresh Linux runners showed the same result; the
+[evaluation](spec/BAZEL_EVALUATION.md#verification-on-2026-10-23) links them.
 
 ## Prove invalidation
 

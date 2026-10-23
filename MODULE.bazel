@@ -6,7 +6,7 @@ the checks whose *inputs* actually changed — replacing the hand-rolled
 scripts/hash-build.ts output-hashing hack.
 
 Stack (versions verified against the Bazel Central Registry, mid-2026):
-  aspect_rules_js 3.2.2, aspect_rules_ts 3.8.11, rules_nodejs 6.7.4, Bazel 8.7.0.
+  aspect_rules_js 3.2.2, rules_nodejs 6.7.4, Bazel 8.7.0.
 """
 
 module(
@@ -15,7 +15,6 @@ module(
 )
 
 bazel_dep(name = "aspect_rules_js", version = "3.2.2")
-bazel_dep(name = "aspect_rules_ts", version = "3.8.11")
 bazel_dep(name = "rules_nodejs", version = "6.7.4")
 
 # --- Node toolchain ---------------------------------------------------------
@@ -39,18 +38,6 @@ use_repo(npm, "npm")
 # pnpm itself (used for `bazel run @pnpm//:pnpm` lockfile maintenance).
 pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
 use_repo(pnpm, "pnpm")
-
-# --- TypeScript version for ts_project --------------------------------------
-# Match the repo's TypeScript 6.0.3 so Bazel's tsc agrees with pnpm/Nx tsc.
-rules_ts_ext = use_extension(
-    "@aspect_rules_ts//ts:extensions.bzl",
-    "ext",
-    dev_dependency = True,
-)
-rules_ts_ext.deps(
-    ts_version_from = "//:package.json",
-)
-use_repo(rules_ts_ext, "npm_typescript")
 
 chromium_repository = use_repo_rule("//tools/bazel:chromium.bzl", "chromium_repository")
 chromium_repository(name = "chromium")

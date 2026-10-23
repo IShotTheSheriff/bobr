@@ -60,6 +60,20 @@ component edits reran no app work. The macOS run of
 `prove-next-invalidation.py --remote --browser` passed all 14 cases on the new
 graph.
 
+GitHub Actions on `IShotTheSheriff/bobr` confirmed the same behavior on fresh
+Linux runners:
+
+| Commit                                          | What ran                                                   | Run                                                                             |
+| ----------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| New build graph                                 | Every build and check, because every action key changed    | [39994006268](https://github.com/IShotTheSheriff/bobr/actions/runs/39994006268) |
+| Documentation and workflow edits                | Nothing; 15 targets reused, no cache upload                | [39994616704](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616704) |
+| Body of `sub` only                              | Docs build, docs browser and unit tests, UI package checks | [39996498057](https://github.com/IShotTheSheriff/bobr/actions/runs/39996498057) |
+| Revert of that change                           | Nothing; 15 targets reused, no cache upload                | [39997122124](https://github.com/IShotTheSheriff/bobr/actions/runs/39997122124) |
+| Full invalidation proof with HTTP cache clients | 14 of 14 cases passed                                      | [39994990364](https://github.com/IShotTheSheriff/bobr/actions/runs/39994990364) |
+
+In the `sub` run, web's Next build, browser test, type check, lint and unit test
+all came from the cache, as did docs' type check and lint.
+
 ## Why the artifact test matters
 
 The first isolated run found missing Next runtime modules. Next imported

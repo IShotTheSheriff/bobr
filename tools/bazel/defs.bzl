@@ -229,7 +229,8 @@ def next_app_e2e(app):
         ],
         no_copy_to_bin = ["@chromium//:files"],
         size = "large",
-        # CI runs the other checks while it installs browser system libraries.
+        # CI runs these after the other checks, so it can retry them once the
+        # browser system libraries finish installing.
         tags = ["browser"],
     )
 
