@@ -18,13 +18,6 @@ bazel_dep(name = "aspect_rules_js", version = "3.2.2")
 bazel_dep(name = "aspect_rules_ts", version = "3.8.11")
 bazel_dep(name = "rules_nodejs", version = "6.7.4")
 
-# --- Gazelle: auto-generate & verify BUILD files from the TS/JS import graph --
-# Aspect's JS/TS Gazelle "language", shipped as a prebuilt binary so we don't
-# need a Rust/cgo/LLVM toolchain to build it from source. dev_dependency: it only
-# authors/checks BUILD files (at dev time and in CI) — it is never part of what
-# the apps themselves build, so it stays out of the production action graph.
-bazel_dep(name = "aspect_gazelle_prebuilt", version = "0.0.20", dev_dependency = True)
-
 # --- Node toolchain ---------------------------------------------------------
 # Use the same pinned Node version in Bazel, local development and CI.
 # scripts/update-node.mjs retrieves official checksums for all supported hosts.

@@ -17,8 +17,6 @@
     "https://bcr.bazel.build/modules/aspect_bazel_lib/2.22.5/source.json": "ac2c3213df8f985785f1d0aeb7f0f73d5324e6e67d593d9b9470fb74a25d4a9b",
     "https://bcr.bazel.build/modules/aspect_bazel_lib/2.7.7/MODULE.bazel": "491f8681205e31bb57892d67442ce448cda4f472a8e6b3dc062865e29a64f89c",
     "https://bcr.bazel.build/modules/aspect_bazel_lib/2.8.1/MODULE.bazel": "812d2dd42f65dca362152101fbec418029cc8fd34cbad1a2fde905383d705838",
-    "https://bcr.bazel.build/modules/aspect_gazelle_prebuilt/0.0.20/MODULE.bazel": "16e5b1fa0d68944bfb8b766303943f4ca57548bcb5b97c6c2e26e70f1659be30",
-    "https://bcr.bazel.build/modules/aspect_gazelle_prebuilt/0.0.20/source.json": "92adea746b73f35ab7e0b885589129f7f5f27246fcf70456bb04b241035404b1",
     "https://bcr.bazel.build/modules/aspect_rules_js/2.0.0/MODULE.bazel": "b45b507574aa60a92796e3e13c195cd5744b3b8aff516a9c0cb5ae6a048161c5",
     "https://bcr.bazel.build/modules/aspect_rules_js/3.2.2/MODULE.bazel": "e844196321b64537cfade338f361633e7d5fe084eee3214fc531b9e7b9838813",
     "https://bcr.bazel.build/modules/aspect_rules_js/3.2.2/source.json": "0e650e493b3bc784dc3f8240ff00b4b32258cde6d021ef6b1db4e387bcfd6a9a",
@@ -192,64 +190,6 @@
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
-    "@@aspect_gazelle_prebuilt+//:extensions.bzl%prebuilt_extension": {
-      "general": {
-        "bzlTransitiveDigest": "zuUvXWO3pUeu6TkOc1iBMazRS0leH0iYrQkdGdmPImQ=",
-        "usagesDigest": "1XvC5GCwQFSFaMocLrS+chRVl5SGpSOu/NpoyvBCqgM=",
-        "recordedFileInputs": {},
-        "recordedDirentsInputs": {},
-        "envVariables": {},
-        "generatedRepoSpecs": {
-          "aspect_gazelle_prebuilt_linux_amd64": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
-            "attributes": {
-              "executable": true,
-              "sha256": "c11b318f8457f2683b84a79700177f6f0f6d092f11689bf4b74d67572563d01f",
-              "urls": [
-                "https://github.com/aspect-build/aspect-gazelle/releases/download/prebuilt-v0.0.20/aspect_gazelle-linux_amd64"
-              ]
-            }
-          },
-          "aspect_gazelle_prebuilt_linux_arm64": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
-            "attributes": {
-              "executable": true,
-              "sha256": "ab40f42c4008e70117844d40ba779e78eaf4bb6692aa031da98c35263eeb13a1",
-              "urls": [
-                "https://github.com/aspect-build/aspect-gazelle/releases/download/prebuilt-v0.0.20/aspect_gazelle-linux_arm64"
-              ]
-            }
-          },
-          "aspect_gazelle_prebuilt_darwin_amd64": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
-            "attributes": {
-              "executable": true,
-              "sha256": "85e8448994baad6ff66cc92600171c10ab6acdfb2b6886f1184fd699b54b3d5a",
-              "urls": [
-                "https://github.com/aspect-build/aspect-gazelle/releases/download/prebuilt-v0.0.20/aspect_gazelle-darwin_amd64"
-              ]
-            }
-          },
-          "aspect_gazelle_prebuilt_darwin_arm64": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
-            "attributes": {
-              "executable": true,
-              "sha256": "43a094aa6b52f881870a028a81c0be9f27b9d3a9c6f7e0e727a5ff841cad0924",
-              "urls": [
-                "https://github.com/aspect-build/aspect-gazelle/releases/download/prebuilt-v0.0.20/aspect_gazelle-darwin_arm64"
-              ]
-            }
-          }
-        },
-        "recordedRepoMappingEntries": [
-          [
-            "aspect_gazelle_prebuilt+",
-            "bazel_tools",
-            "bazel_tools"
-          ]
-        ]
-      }
-    },
     "@@aspect_rules_ts+//ts:extensions.bzl%ext": {
       "general": {
         "bzlTransitiveDigest": "VLBM+xAmHIkUBo6q6ZrBLvZrmlgr1GfV2104wKXqLWg=",

@@ -1,42 +1,6 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
-load("@aspect_rules_js//npm:defs.bzl", "npm_package")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
-load("//tools/bazel:defs.bzl", "NEXT_APP_PKG_EXCLUDE", "bazel_ts_tsconfig", "next_app_build")
+load("//tools/bazel:defs.bzl", "next_app")
 
 npm_link_all_packages()
 
-# Next consumes the generated UI tree. Identical projection bytes reuse the
-# cached Next artifact even though a fresh Next build is not reproducible.
-next_app_build()
-
-# First-party workspace package `web` (the Next.js app source). Required so the
-# workspace:* link that packages/web-e2e declares resolves.
-npm_package(
-    name = "pkg",
-    srcs = glob(["**/*"], exclude = NEXT_APP_PKG_EXCLUDE),
-    visibility = ["//visibility:public"],
-)
-
-# The "web" CI check at the TS layer: compile + type-check the logic that
-# consumes @repo/ui. It depends ONLY on the `add` leaf — never on `sub`.
-ts_project(
-    name = "logic",
-    srcs = [
-        "bazel/logic.test.ts",
-        "bazel/logic.ts",
-    ],
-    declaration = True,
-    tsconfig = bazel_ts_tsconfig(types = ["node"]),
-    deps = [
-        ":node_modules/@types/node",
-        "//packages/ui/src/utils/add",
-    ],
-)
-
-# A runnable unit test (a real "check"). Re-runs only when its inputs change.
-js_test(
-    name = "test",
-    data = [":logic"],
-    entry_point = "bazel/logic.test.js",
-)
+next_app()

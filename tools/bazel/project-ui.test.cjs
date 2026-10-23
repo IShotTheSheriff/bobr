@@ -23,7 +23,7 @@ function fixture(t, appSource, utilitySource) {
       exports: { "./utils": "./src/utils/index.ts", "./*": "./src/*.tsx" },
     }),
   );
-  return { app, source, output, run: () => projectUi(app, source, output) };
+  return { app, source, output, run: () => projectUi(root, source, output) };
 }
 
 for (const specifier of ["./utils", "./utils/index", "./utils/index.js"]) {
@@ -264,4 +264,54 @@ test("rejects export-map overrides instead of projecting the wrong module", asyn
     f.run(),
     /Update the projection when @repo\/ui package exports change/,
   );
+});
+
+for (const [name, importer, tsconfig] of [
+  ["a relative import", 'import { calculate } from "../lib/calc";', null],
+  [
+    "a tsconfig paths alias",
+    'import { calculate } from "@/lib/calc";',
+    { compilerOptions: { paths: { "@/*": ["./*"] } } },
+  ],
+]) {
+  test(`follows app code outside app/ through ${name}`, async (t) => {
+    const f = fixture(
+      t,
+      `${importer} export const result = calculate();`,
+      "export const used = 1; export const unused = 2;",
+    );
+    const root = path.dirname(f.app);
+    fs.mkdirSync(path.join(root, "lib"));
+    fs.writeFileSync(
+      path.join(root, "lib/calc.ts"),
+      'import { used } from "@repo/ui/utils"; export const calculate = () => used;',
+    );
+    if (tsconfig)
+      fs.writeFileSync(path.join(root, "tsconfig.json"), JSON.stringify(tsconfig));
+    await f.run();
+    const contents = fs.readFileSync(path.join(f.output, "utils/index.js"), "utf8");
+    assert.match(contents, /used/);
+    assert.doesNotMatch(contents, /unused/);
+  });
+}
+
+test("Next entry files outside app/ are projection roots", async (t) => {
+  const f = fixture(t, "export const empty = 1;", "export const used = 1;");
+  fs.writeFileSync(
+    path.join(path.dirname(f.app), "middleware.ts"),
+    'import { used } from "@repo/ui/utils"; export const middleware = () => used;',
+  );
+  await f.run();
+  assert.match(
+    fs.readFileSync(path.join(f.output, "utils/index.js"), "utf8"),
+    /used/,
+  );
+});
+
+test("app imports outside the app package fail explicitly", async (t) => {
+  const f = fixture(t, 'import "../../elsewhere";', "");
+  const root = path.dirname(f.app);
+  fs.writeFileSync(path.join(path.dirname(root), "elsewhere.ts"), "");
+  t.after(() => fs.rmSync(path.join(path.dirname(root), "elsewhere.ts"), { force: true }));
+  await assert.rejects(f.run(), /outside declared app\/UI sources/);
 });

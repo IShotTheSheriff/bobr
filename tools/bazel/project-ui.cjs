@@ -3,6 +3,36 @@ const path = require("node:path");
 const ts = require("typescript");
 const esbuild = require("esbuild");
 
+// Next loads these folders and files itself. Other app files count only when
+// one of them imports them.
+const ENTRY_DIRS = ["app", "pages", "src/app", "src/pages"];
+const ENTRY_FILE =
+  /^(middleware|proxy|instrumentation|instrumentation-client|mdx-components)\.[cm]?[jt]sx?$/;
+
+function compilerOptions(app) {
+  const config = path.join(app, "tsconfig.json");
+  if (!fs.existsSync(config)) return {};
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    config,
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic(diagnostic) {
+        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText));
+      },
+    },
+  );
+  // TS18003 only reports that no file matched `include`.
+  const errors = parsed.errors.filter((diagnostic) => diagnostic.code !== 18003);
+  if (errors.length)
+    throw new Error(
+      errors
+        .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))
+        .join("\n"),
+    );
+  return parsed.options;
+}
+
 // This boundary covers ordinary TypeScript utilities. React modules keep their
 // original files and directives so Next owns client/server compilation.
 async function projectUi(app, source, output) {
@@ -44,34 +74,78 @@ async function projectUi(app, source, output) {
   }
   const uiRoot = path.join(source, "src");
   const reachable = new Set();
-  const queue = files(app);
+  const queue = [
+    ...ENTRY_DIRS.map((dir) => path.join(app, dir))
+      .filter((dir) => fs.existsSync(dir))
+      .flatMap(files),
+    ...[app, path.join(app, "src")]
+      .filter((dir) => fs.existsSync(dir))
+      .flatMap((dir) =>
+        fs
+          .readdirSync(dir)
+          .filter((name) => ENTRY_FILE.test(name))
+          .sort()
+          .map((name) => path.join(dir, name)),
+      ),
+  ];
   const visited = new Set();
-  function follow(specifier, importer) {
-    let candidate;
-    if (specifier.startsWith("@repo/ui/")) {
-      candidate = path.join(
-        uiRoot,
-        specifier.slice("@repo/ui/".length) + ".tsx",
-      );
-    } else if (specifier.startsWith(".")) {
-      candidate = path.resolve(path.dirname(importer), specifier);
-    } else {
-      if (specifier === "@repo/ui" || specifier.startsWith("@/"))
-        throw new Error(
-          `${importer}: unsupported projection alias ${specifier}`,
-        );
-      return; // External npm dependency, declared separately in the Next action.
+  const { paths = {}, pathsBasePath = app } = compilerOptions(app);
+  // tsconfig `paths`, such as create-next-app's "@/*": ["./*"]. As in
+  // TypeScript, the pattern with the longest prefix wins.
+  function aliasTargets(specifier) {
+    let best;
+    for (const [pattern, targets] of Object.entries(paths)) {
+      const [prefix, suffix = ""] = pattern.split("*");
+      const wildcard = pattern.includes("*");
+      if (
+        wildcard
+          ? specifier.length >= prefix.length + suffix.length &&
+            specifier.startsWith(prefix) &&
+            specifier.endsWith(suffix)
+          : specifier === pattern
+      )
+        if (!best || prefix.length > best.prefix.length)
+          best = { prefix, suffix, wildcard, targets };
     }
-    const options = [candidate];
-    // Match TypeScript's .js-to-source resolution and extensionless imports.
-    if (candidate.endsWith(".js"))
-      options.unshift(
-        candidate.slice(0, -3) + ".ts",
-        candidate.slice(0, -3) + ".tsx",
-      );
-    if (!path.extname(candidate))
-      for (const ext of [".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs", ".json"])
-        options.push(candidate + ext, path.join(candidate, "index" + ext));
+    if (!best) return null;
+    const middle = best.wildcard
+      ? specifier.slice(best.prefix.length, specifier.length - best.suffix.length)
+      : "";
+    return best.targets.map((target) =>
+      path.resolve(pathsBasePath, target.replace("*", middle)),
+    );
+  }
+  function follow(specifier, importer) {
+    let candidates;
+    if (specifier.startsWith("@repo/ui/")) {
+      candidates = [
+        path.join(uiRoot, specifier.slice("@repo/ui/".length) + ".tsx"),
+      ];
+    } else if (specifier.startsWith(".")) {
+      candidates = [path.resolve(path.dirname(importer), specifier)];
+    } else {
+      candidates = aliasTargets(specifier);
+      if (!candidates) {
+        if (specifier === "@repo/ui" || specifier.startsWith("@/"))
+          throw new Error(
+            `${importer}: unsupported projection alias ${specifier}`,
+          );
+        return; // External npm dependency, declared separately in the Next action.
+      }
+    }
+    const options = candidates.flatMap((candidate) => {
+      const options = [candidate];
+      // Match TypeScript's .js-to-source resolution and extensionless imports.
+      if (candidate.endsWith(".js"))
+        options.unshift(
+          candidate.slice(0, -3) + ".ts",
+          candidate.slice(0, -3) + ".tsx",
+        );
+      if (!path.extname(candidate))
+        for (const ext of [".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs", ".json"])
+          options.push(candidate + ext, path.join(candidate, "index" + ext));
+      return options;
+    });
     const resolved = options.find(
       (f) => fs.existsSync(f) && fs.statSync(f).isFile(),
     );

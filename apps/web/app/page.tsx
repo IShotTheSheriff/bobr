@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { add } from "@repo/ui/utils";
+import { calculate } from "../lib/calculator";
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { Calculator, Database, Box, Scissors, Target } from "lucide-react";
@@ -175,7 +175,7 @@ export default function Home() {
   const [inputVal, setInputVal] = useState(50);
   const [isIdle, setIsIdle] = useState(false);
   const [lastInteraction, setLastInteraction] = useState(() => Date.now());
-  const result = add(inputVal);
+  const result = calculate(inputVal);
 
   // Idle detection logic
   useEffect(() => {

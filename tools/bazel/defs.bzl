@@ -1,92 +1,66 @@
-"""Shared TypeScript and Next build rules for the Bóbr cache experiment."""
+"""Shared Next, projection and test rules for the Bóbr monorepo."""
 
 load("@aspect_rules_js//js:defs.bzl", "js_run_binary", "js_test")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@npm//:defs.bzl", "npm_link_targets")
 
-_TS_COMPILER_OPTIONS = {
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
-    "target": "es2022",
-    "esModuleInterop": True,
-    "strict": True,
-    "isolatedModules": True,
-    "skipLibCheck": True,
-}
-
-def bazel_ts_tsconfig(types = None):
-    """Returns a `ts_project(tsconfig = ...)` dict for the Bazel TS layer.
-
-    Args:
-      types: optional `compilerOptions.types` list (e.g. `["node"]` for the app
-        logic targets, which import `node:assert`). Omitted for the pure-utility
-        leaf targets, which need no ambient types.
-    """
-    opts = dict(_TS_COMPILER_OPTIONS)
-    if types != None:
-        opts["types"] = types
-    return {"compilerOptions": opts}
-
-# Inputs the `next build` action needs beyond the app's own `app/**` + `public/**`
-# sources: the config files plus every runtime/build npm dependency. Identical
-# for both apps; the relative `:node_modules/...` labels resolve against the
-# calling package (each app runs `npm_link_all_packages()`, which creates them).
-NEXT_BUILD_INPUTS = [
-    "next.config.js",
-    "vercel-build.json",
-    "postcss.config.mjs",
-    "tsconfig.json",
-    "package.json",
-    ":node_modules/next",
-    ":node_modules/react",
-    ":node_modules/react-dom",
-    ":ui_projection",
-    ":node_modules/clsx",
-    ":node_modules/framer-motion",
-    ":node_modules/lucide-react",
-    ":node_modules/sonner",
-    ":node_modules/tailwind-merge",
-    ":node_modules/@tailwindcss/postcss",
-    ":node_modules/tailwindcss",
-    ":node_modules/autoprefixer",
-    ":node_modules/postcss",
-    # Next loads the tsconfig and TypeScript tooling even with checking skipped.
-    ":node_modules/@repo/typescript-config",
-    ":node_modules/typescript",
-    ":node_modules/@types/node",
-    ":node_modules/@types/react",
-    ":node_modules/@types/react-dom",
-]
-
-# Paths excluded from a first-party Next.js app's `npm_package` glob (build
-# outputs, the Bazel TS layer, and the BUILD file itself).
-NEXT_APP_PKG_EXCLUDE = [
+# Files in an app package that never affect `next build`. Every other file is an
+# input, so new source folders, configs and .env files need no rule changes.
+# Markdown pages (`pageExtensions`) would need "**/*.md" removed from this list.
+_NOT_BUILD_INPUTS = [
+    "**/*.md",
+    "**/*.test.*",
+    "**/.gitignore",
+    "BUILD.bazel",
+    "eslint.config.*",
+    "next-env.d.ts",
+    "*.tsbuildinfo",
     "node_modules/**",
     ".next/**",
     ".vercel/**",
     "vercel_output/**",
-    "bazel/**",
-    "next-env.d.ts",
     "ui_runtime/**",
-    "BUILD.bazel",
+    "out/**",
+    "coverage/**",
 ]
 
+# The projection replaces @repo/ui, and `next build` does not run ESLint.
+_NOT_BUILD_DEPS = ["@repo/ui", "@repo/eslint-config", "eslint"]
 
-def next_app_build():
-    """Builds the app from a deterministic UI projection and declared npm inputs."""
-    app = native.package_name()
-    app_sources = native.glob(["app/**"])
+def _dep_name(label):
+    return label.rsplit(":node_modules/", 1)[1]
+
+def next_app():
+    """Builds, tests and archives the Next app in the calling package.
+
+    Inputs come from the package's files and its package.json dependencies, so
+    adding pages, folders or npm packages needs no BUILD changes.
+    """
+    package = native.package_name()
+    sources = native.glob(["**/*"], exclude = _NOT_BUILD_INPUTS)
+    links = npm_link_targets()
+    deps = [dep for dep in links if _dep_name(dep) not in _NOT_BUILD_DEPS]
+
+    # The projection reads tsconfig `paths`, which can come from an extended config.
     js_run_binary(
         name = "ui_projection",
-        srcs = app_sources + ["//packages/ui:pkg"],
-        args = [app + "/app", "$(rootpath //packages/ui:pkg)", app + "/ui_runtime"],
+        srcs = sources + ["//packages/ui:pkg"] + [
+            dep
+            for dep in deps
+            if _dep_name(dep) == "@repo/typescript-config"
+        ],
+        args = [package, "$(rootpath //packages/ui:pkg)", package + "/ui_runtime"],
         out_dirs = ["ui_runtime"],
         mnemonic = "UiProjection",
         tool = "//tools/bazel:project_ui",
     )
+
+    # Next consumes the generated UI tree. Identical projection bytes reuse the
+    # cached Next artifact even though a fresh Next build is not reproducible.
     js_run_binary(
         name = "next_build",
-        srcs = app_sources + native.glob(["public/**"]) + NEXT_BUILD_INPUTS,
-        chdir = app,
+        srcs = sources + deps + [":ui_projection"],
+        chdir = package,
         env = select({
             "//tools/bazel:production": _next_env("production"),
             "//conditions:default": _next_env("preview"),
@@ -106,6 +80,44 @@ def next_app_build():
         visibility = ["//visibility:public"],
     )
 
+    unit_tests(srcs = sources + links)
+
+    # Required so the workspace:* link that the e2e package declares resolves.
+    npm_package(
+        name = "pkg",
+        srcs = sources,
+        visibility = ["//visibility:public"],
+    )
+
+def unit_tests(srcs):
+    """Creates a cached test for each `*.test.ts(x)` file in the calling package.
+
+    esbuild bundles each test with only the code it reaches. The bundle is the
+    test's only input, so edits to code the test never reaches reuse its result.
+
+    Args:
+      srcs: files and npm links the tests may import.
+    """
+    package = native.package_name()
+    for test in native.glob(
+        ["**/*.test.ts", "**/*.test.tsx"],
+        exclude = ["node_modules/**"],
+        allow_empty = True,
+    ):
+        name = test.rsplit(".", 1)[0]
+        bundle = name + ".bundle.cjs"
+        js_run_binary(
+            name = name + "_bundle",
+            srcs = srcs + [test],
+            args = [package + "/" + test, package + "/" + bundle],
+            outs = [bundle],
+            mnemonic = "BundleTest",
+            tool = "//tools/bazel:bundle_test",
+        )
+        js_test(
+            name = name,
+            entry_point = bundle,
+        )
 
 def _build_output_impl(ctx):
     return [DefaultInfo(files = depset([f for f in ctx.attr.src[DefaultInfo].files.to_list() if f.basename == ctx.attr.basename]))]
@@ -114,7 +126,6 @@ _build_output = rule(
     implementation = _build_output_impl,
     attrs = {"src": attr.label(mandatory = True), "basename": attr.string(mandatory = True)},
 )
-
 
 def next_app_e2e(app):
     """Tests the cached deployable artifact in a pinned browser."""
@@ -137,7 +148,6 @@ def next_app_e2e(app):
         no_copy_to_bin = ["@chromium//:files"],
         size = "large",
     )
-
 
 def _next_env(target):
     return {

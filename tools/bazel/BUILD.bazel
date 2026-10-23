@@ -14,6 +14,13 @@ js_test(
 )
 
 js_binary(
+    name = "bundle_test",
+    entry_point = "bundle-test.cjs",
+    data = ["//:node_modules/esbuild"],
+    visibility = ["//visibility:public"],
+)
+
+js_binary(
     name = "build_next",
     entry_point = "build-next.cjs",
     data = ["trace-fs.cjs", "check-artifact.cjs", "//:node_modules/vercel", "//:node_modules/tar"],

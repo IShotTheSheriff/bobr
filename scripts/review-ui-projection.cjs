@@ -28,7 +28,7 @@ async function fixture(name, appSource, sources) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, content);
   }
-  await projectUi(app, source, output);
+  await projectUi(dir, source, output);
   return {
     app,
     source,
