@@ -159,6 +159,17 @@ Next build ID reduces churn but is not a content-derived deployment identifier.
 
 ## Hosted acceptance still required
 
+Verified without deploying: the Vercel API returns the project, account and
+deployment-list shapes that `deploy-vercel.cjs` and its reuse search rely on,
+and both projects have no shared environment variables, so the reuse key is
+computed. The self-hosted cache acceptance passed on GitHub Actions
+([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
+with separate producer, read-only consumer and next-commit clients. After each
+deploy or reuse, CI now compares the live URL with the tested archive; against
+local servers of the real archives, that check passes for each app and reports
+every route, title, API body and asset that differs when the apps are swapped.
+No deployment exists yet, because deployment needs the token below.
+
 The `bobr-web` and `bobr-docs` projects exist under `0xVentures`. CI now runs on
 `IShotTheSheriff/bobr`, so the project IDs, deployment credential and deploy
 switch belong there. Follow [the setup guide](BAZEL_DEPLOYMENT.md) to add them
