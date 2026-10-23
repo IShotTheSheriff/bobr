@@ -123,6 +123,26 @@ def next_app():
         visibility = ["//visibility:public"],
     )
 
+def shared_package():
+    """Packages, tests, type-checks and lints a shared package with a src/ folder.
+
+    Apps link the package through package.json. Each check reads the package's
+    own files, so edits elsewhere never rerun them.
+    """
+    files = ["package.json"] + native.glob(["src/**/*"])
+    sources = ["package.json"] + native.glob(["src/**/*"], exclude = ["src/**/*.test.*"])
+    npm_package(
+        name = "pkg",
+        srcs = sources,
+        visibility = ["//visibility:public"],
+    )
+    unit_tests(srcs = sources + package_deps())
+    if native.glob(["tsconfig.json"], allow_empty = True):
+        typecheck(srcs = files + ["tsconfig.json"] + package_deps())
+    lint_config = native.glob(["eslint.config.*"], allow_empty = True)
+    if lint_config:
+        lint(srcs = files + lint_config + package_deps(lint = True))
+
 def typecheck(srcs, ui_types = None):
     """Type-checks the calling package with its tsconfig.json as a cached test.
 
@@ -209,6 +229,8 @@ def next_app_e2e(app):
         ],
         no_copy_to_bin = ["@chromium//:files"],
         size = "large",
+        # CI runs the other checks while it installs browser system libraries.
+        tags = ["browser"],
     )
 
 def _next_env(target):

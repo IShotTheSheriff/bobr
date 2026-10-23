@@ -33,10 +33,14 @@ jobs:
           node-version-file: .nvmrc
       - name: Check deployment reuse behavior
         run: node --test scripts/test_vercel_reuse.cjs
-      - name: Install Bazelisk and browser system libraries
+      - name: Install Bazelisk
+        run: npm install -g @bazel/bazelisk
+      # Only the browser tests need these libraries. Installing them while Bazel
+      # runs the other checks means a slow package mirror delays only those tests.
+      - name: Start installing browser system libraries
         run: |
-          npm install -g @bazel/bazelisk
-          npx --yes playwright@1.61.0 install-deps chromium
+          (npx --yes playwright@1.61.0 install-deps chromium > "$RUNNER_TEMP/browser-deps.log" 2>&1
+           echo $? > "$RUNNER_TEMP/browser-deps.status") &
       - name: Configure cache access
         env:
           PUBLIC_CACHE: ${{ vars.BAZEL_REMOTE_PUBLIC_READ }}
@@ -56,8 +60,18 @@ jobs:
             bazel-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel.lock', 'pnpm-lock.yaml') }}-
             bazel-${{ runner.os }}-${{ runner.arch }}-
             bazel-${{ runner.os }}-
-      - name: Build and test deployable artifacts
-        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET"
+      - name: Build, then run checks that need no browser
+        run: python3 scripts/bazel.py test //... --test_tag_filters=-browser --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/checks.exec.json"
+      - name: Wait for browser system libraries
+        run: |
+          while [ ! -f "$RUNNER_TEMP/browser-deps.status" ]; do sleep 2; done
+          tail -n 3 "$RUNNER_TEMP/browser-deps.log"
+          exit "$(cat "$RUNNER_TEMP/browser-deps.status")"
+      - name: Run browser tests against the deployment archives
+        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/browser.exec.json"
+      - name: Summarize what ran and what came from cache
+        if: always()
+        run: python3 scripts/ci-summary.py "$RUNNER_TEMP/checks.exec.json" "$RUNNER_TEMP/browser.exec.json"
       - name: Save successful build cache
         uses: actions/cache/save@v4
         with:
@@ -96,26 +110,9 @@ jobs:
           path: bazel-testlogs/packages/*-e2e/test/
           if-no-files-found: ignore
 
-  typecheck:
-    name: Application type checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: typecheck-${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter web --filter docs --filter @repo/ui check-types
-
   deploy:
     name: Deploy tested ${{ matrix.app }} artifact
-    needs: [bazel, typecheck]
+    needs: [bazel]
     # Enable after configuring the account. Fork PRs never receive deployment
     # credentials. The bazel branch preview deploys on push to avoid duplicates.
     if: >-

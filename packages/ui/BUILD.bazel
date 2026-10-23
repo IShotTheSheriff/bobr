@@ -1,21 +1,8 @@
-load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("@npm//:defs.bzl", "npm_link_all_packages")
-load("//tools/bazel:defs.bzl", "lint", "package_deps", "typecheck", "unit_tests")
+load("//tools/bazel:defs.bzl", "shared_package")
 
 npm_link_all_packages()
 
-SOURCES = ["package.json"] + glob(["src/**/*"], exclude = ["src/**/*.test.*"])
-
-# First-party workspace package `@repo/ui`, linked into apps that depend on it.
-# Its exports map points at TypeScript sources; each app's projection reads them.
-npm_package(
-    name = "pkg",
-    srcs = SOURCES,
-    visibility = ["//visibility:public"],
-)
-
-unit_tests(srcs = SOURCES + package_deps())
-
-typecheck(srcs = ["package.json", "tsconfig.json"] + glob(["src/**/*"]) + package_deps())
-
-lint(srcs = ["eslint.config.mjs", "package.json"] + glob(["src/**/*"]) + package_deps(lint = True))
+# `@repo/ui`. Its exports map points at TypeScript sources, which each app's
+# projection reads.
+shared_package()
