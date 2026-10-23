@@ -58,3 +58,9 @@ js_library(
     srcs = ["lint.cjs"],
     visibility = ["//visibility:public"],
 )
+
+js_test(
+    name = "check_deployment_test",
+    entry_point = "check-deployment.test.cjs",
+    data = ["check-deployment.cjs", ":artifact_helpers", "//:node_modules/tar"],
+)

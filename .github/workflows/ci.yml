@@ -172,13 +172,25 @@ jobs:
             echo 'Skipping deployment for a superseded or deleted ref.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Deploy without rebuilding
+        id: deploy
         if: steps.current.outputs.deploy == 'true'
         env:
           APP: ${{ matrix.app }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ matrix.app == 'web' && vars.VERCEL_WEB_PROJECT_ID || vars.VERCEL_DOCS_PROJECT_ID }}
+          # An index lookup stays empty for a missing variable. The `a && b || c` form
+          # would fall through to the other app's project.
+          VERCEL_PROJECT_ID: ${{ vars[format('VERCEL_{0}_PROJECT_ID', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
           DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
           DEPLOY_SCOPE: ${{ github.repository }}:${{ github.ref }}
           VERCEL_FORCE_DEPLOY: ${{ vars.VERCEL_FORCE_DEPLOY }}
         run: node scripts/deploy-vercel.cjs "artifacts/$APP.tar" "$DEPLOY_TARGET"
+      # Compares the live deployment, reused or new, with the archive the browser
+      # tests passed. Protected deployments need the automation bypass secret.
+      - name: Compare the deployment with the tested archive
+        if: steps.deploy.outputs.url
+        env:
+          APP: ${{ matrix.app }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
+        run: node tools/bazel/check-deployment.cjs "artifacts/$APP.tar" "$DEPLOYMENT_URL"

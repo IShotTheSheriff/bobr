@@ -55,9 +55,17 @@ credentials. GitHub environments are named `preview` and `production`.
 
 Both projects use Vercel Authentication for every deployment URL except custom
 domains. People outside the Vercel team, and scripts without a bypass secret,
-get a login page instead of the app. Hosted smoke tests from CI need a
-"Protection Bypass for Automation" secret. Locally, `vercel curl` sends
-authenticated requests to a protected deployment.
+get a login page instead of the app. Locally, `vercel curl` sends authenticated
+requests to a protected deployment.
+
+After each deploy or reuse, CI compares the live URL with the archive the
+browser tests passed. `tools/bazel/check-deployment.cjs` serves that archive
+locally and requests `/`, `/demo`, `/api/hello`, a missing page and the home
+page's static assets from both. Status codes, page titles and API bodies must
+match, and every asset must load. To let CI through Vercel Authentication,
+create a "Protection Bypass for Automation" secret in each project and store
+them as `VERCEL_WEB_BYPASS_SECRET` and `VERCEL_DOCS_BYPASS_SECRET` repository
+secrets. Without them, the check reports that it skipped.
 
 The deployment script checks the artifact target and requires Linux x64 with
 Node 24. Preview and production are separate Bazel configurations through
