@@ -19,6 +19,11 @@ common --@aspect_rules_ts//ts:default_to_tsc_transpiler
 # Don't leak the host's full environment into actions; only declared env is used.
 build --incompatible_strict_action_env
 
+# Every test's runfiles carry a repo mapping file. By default it lists each npm
+# package repository, so any lockfile edit would rerun every test. The compact
+# form lists the npm extension once.
+common --incompatible_compact_repo_mapping_manifest
+
 # Surface why something rebuilt when diagnosing cache behaviour (off by default;
 # enable per-invocation with --explain=... --verbose_explanations).
 

@@ -52,3 +52,9 @@ js_library(
     srcs = ["typecheck.cjs"],
     visibility = ["//visibility:public"],
 )
+
+js_library(
+    name = "lint",
+    srcs = ["lint.cjs"],
+    visibility = ["//visibility:public"],
+)

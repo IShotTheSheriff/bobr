@@ -68,6 +68,13 @@ def next_app():
     )
     typecheck(srcs = checked + deps + [":ui_types"], ui_types = package + "/ui_types")
 
+    # ESLint reads no @repo/ui source, so UI edits never rerun an app's lint.
+    lint(srcs = checked + native.glob(["eslint.config.*"]) + [
+        dep
+        for dep in links
+        if _dep_name(dep) != "@repo/ui"
+    ])
+
     # Next consumes the generated UI tree. Identical projection bytes reuse the
     # cached Next artifact even though a fresh Next build is not reproducible.
     js_run_binary(
@@ -115,6 +122,19 @@ def typecheck(srcs, ui_types = None):
         entry_point = "//tools/bazel:typecheck",
         data = srcs,
         args = [package] + ([ui_types] if ui_types else []),
+    )
+
+def lint(srcs):
+    """Lints the calling package with its eslint.config file as a cached test.
+
+    Args:
+      srcs: the files to lint, the config and the npm links it loads.
+    """
+    js_test(
+        name = "lint",
+        entry_point = "//tools/bazel:lint",
+        data = srcs,
+        args = [native.package_name()],
     )
 
 def unit_tests(srcs):
