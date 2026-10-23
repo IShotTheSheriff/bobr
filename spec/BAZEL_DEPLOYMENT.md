@@ -28,9 +28,18 @@ The local Vercel CLI authenticated to the intended account and created these
 projects. Its credentials are separate from the Vercel connector and GitHub
 Actions. Do not put tokens in chat or in this repository.
 
-The team and both project IDs are configured as Actions variables on
-`ernest-oneteam/bobr`, where CI runs. Add a deployment token as `VERCEL_TOKEN`,
-then set `VERCEL_DEPLOY_ENABLED=1`. Deployment remains disabled until then.
+CI runs on `IShotTheSheriff/bobr`. Set the values below there; the earlier CI
+fork, `ernest-oneteam/bobr`, holds only the team and project IDs. Create the
+token in the Vercel team settings and store it only as a GitHub secret.
+Deployment remains disabled until `VERCEL_DEPLOY_ENABLED=1`.
+
+```sh
+gh variable set VERCEL_ORG_ID --repo IShotTheSheriff/bobr --body team_741BpS6ntDg8vt3g4Mb4VW3d
+gh variable set VERCEL_WEB_PROJECT_ID --repo IShotTheSheriff/bobr --body prj_k3tVj5hvQzFRwqH0ZKaVeAbNkLT5
+gh variable set VERCEL_DOCS_PROJECT_ID --repo IShotTheSheriff/bobr --body prj_huSklU0QuBfsObtmU9zKxWhuAB93
+gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr   # paste the token at the prompt
+gh variable set VERCEL_DEPLOY_ENABLED --repo IShotTheSheriff/bobr --body 1
+```
 
 | Setting                  | Kind     | Value                             |
 | ------------------------ | -------- | --------------------------------- |
@@ -43,6 +52,12 @@ then set `VERCEL_DEPLOY_ENABLED=1`. Deployment remains disabled until then.
 Pushes to `main` build and deploy production artifacts. The `bazel` branch and
 same-repository PRs build previews. Fork PRs build and test without deployment
 credentials. GitHub environments are named `preview` and `production`.
+
+Both projects use Vercel Authentication for every deployment URL except custom
+domains. People outside the Vercel team, and scripts without a bypass secret,
+get a login page instead of the app. Hosted smoke tests from CI need a
+"Protection Bypass for Automation" secret. Locally, `vercel curl` sends
+authenticated requests to a protected deployment.
 
 The deployment script checks the artifact target and requires Linux x64 with
 Node 24. Preview and production are separate Bazel configurations through
