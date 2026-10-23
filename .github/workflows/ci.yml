@@ -64,7 +64,6 @@ jobs:
         run: |
           mkdir -p .bazel-cache
           find .bazel-cache -type f | wc -l > "$RUNNER_TEMP/cache-entries"
-          touch "$RUNNER_TEMP/cache-restored"
       - name: Build, then run checks that need no browser
         run: python3 scripts/bazel.py test //... --test_tag_filters=-browser --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/checks.exec.json"
       - name: Wait for browser system libraries
@@ -94,16 +93,16 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define=deploy_env=preview
       # Every save uploads the whole cache and counts against the repository's
-      # cache quota. Keep only entries this run used, and skip the upload when
-      # Bazel stored nothing new. Bazel refreshes the timestamp of each entry it
-      # reads, so older entries were not used.
-      - name: Keep only the cache entries this run used
+      # cache quota. Skip the upload when Bazel stored nothing new, and drop
+      # entries no run has read for a week. Bazel refreshes an entry's timestamp
+      # when it reads it, and the cache archive keeps those timestamps.
+      - name: Drop cache entries unused for a week
         id: trim
         run: |
           before=$(cat "$RUNNER_TEMP/cache-entries")
           after=$(find .bazel-cache -type f | wc -l)
           if [ "$after" -gt "$before" ]; then
-            find .bazel-cache -type f ! -newer "$RUNNER_TEMP/cache-restored" -delete
+            find .bazel-cache -type f -mtime +7 -delete
             echo "save=true" >> "$GITHUB_OUTPUT"
           fi
           kept=$(find .bazel-cache -type f | wc -l)
