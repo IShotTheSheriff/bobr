@@ -26,6 +26,32 @@ jobs:
       DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
       - uses: actions/checkout@v4
+      # Says which deployment settings are missing, without printing any value.
+      - name: Report the Vercel deployment setup
+        env:
+          ENABLED: ${{ vars.VERCEL_DEPLOY_ENABLED == '1' }}
+          ORG_ID: ${{ vars.VERCEL_ORG_ID != '' }}
+          WEB_PROJECT_ID: ${{ vars.VERCEL_WEB_PROJECT_ID != '' }}
+          DOCS_PROJECT_ID: ${{ vars.VERCEL_DOCS_PROJECT_ID != '' }}
+          TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+          WEB_BYPASS: ${{ secrets.VERCEL_WEB_BYPASS_SECRET != '' }}
+          DOCS_BYPASS: ${{ secrets.VERCEL_DOCS_BYPASS_SECRET != '' }}
+        run: |
+          missing=""
+          [ "$ENABLED" = true ] || missing="$missing VERCEL_DEPLOY_ENABLED=1"
+          [ "$ORG_ID" = true ] || missing="$missing VERCEL_ORG_ID"
+          [ "$WEB_PROJECT_ID" = true ] || missing="$missing VERCEL_WEB_PROJECT_ID"
+          [ "$DOCS_PROJECT_ID" = true ] || missing="$missing VERCEL_DOCS_PROJECT_ID"
+          [ "$TOKEN" = true ] || missing="$missing VERCEL_TOKEN"
+          if [ -n "$missing" ]; then
+            line="Vercel deployment is off. Missing:$missing."
+          elif [ "$WEB_BYPASS" = true ] && [ "$DOCS_BYPASS" = true ]; then
+            line="Vercel deployment is on, and CI checks each live deployment."
+          else
+            line="Vercel deployment is on. Add VERCEL_WEB_BYPASS_SECRET and VERCEL_DOCS_BYPASS_SECRET to check protected deployments."
+          fi
+          echo "$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
       - name: Check CI helper behavior
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - uses: actions/setup-node@v4
