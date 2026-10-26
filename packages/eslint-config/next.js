@@ -35,6 +35,11 @@ export const nextJsConfig = [
     },
   },
   {
+    // Next loads its config files in Node.
+    files: ["*.config.{js,mjs,cjs}"],
+    languageOptions: { globals: globals.node },
+  },
+  {
     plugins: {
       "@next/next": pluginNext,
     },

@@ -9,15 +9,14 @@ common --color=yes
 build --show_result=20
 test --test_output=errors
 
-# --- TypeScript -------------------------------------------------------------
-# Use tsc as the ts_project transpiler (transpile + type-check in one action).
-# Simplest correct choice; swc would add per-file parallelism but isn't needed
-# for a 2-app PoC.
-common --@aspect_rules_ts//ts:default_to_tsc_transpiler
-
 # --- Hermeticity ------------------------------------------------------------
 # Don't leak the host's full environment into actions; only declared env is used.
 build --incompatible_strict_action_env
+
+# Every test's runfiles carry a repo mapping file. By default it lists each npm
+# package repository, so any lockfile edit would rerun every test. The compact
+# form lists the npm extension once.
+common --incompatible_compact_repo_mapping_manifest
 
 # Surface why something rebuilt when diagnosing cache behaviour (off by default;
 # enable per-invocation with --explain=... --verbose_explanations).

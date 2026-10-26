@@ -14,6 +14,13 @@ js_test(
 )
 
 js_binary(
+    name = "bundle_test",
+    entry_point = "bundle-test.cjs",
+    data = ["//:node_modules/esbuild"],
+    visibility = ["//visibility:public"],
+)
+
+js_binary(
     name = "build_next",
     entry_point = "build-next.cjs",
     data = ["trace-fs.cjs", "check-artifact.cjs", "//:node_modules/vercel", "//:node_modules/tar"],
@@ -39,4 +46,21 @@ js_library(
     srcs = ["run-playwright.cjs"],
     deps = [":artifact_helpers"],
     visibility = ["//visibility:public"],
+)
+js_library(
+    name = "typecheck",
+    srcs = ["typecheck.cjs"],
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "lint",
+    srcs = ["lint.cjs"],
+    visibility = ["//visibility:public"],
+)
+
+js_test(
+    name = "check_deployment_test",
+    entry_point = "check-deployment.test.cjs",
+    data = ["check-deployment.cjs", ":artifact_helpers", "//:node_modules/tar"],
 )

@@ -1,26 +1,8 @@
-load("@aspect_gazelle_prebuilt//:def.bzl", "aspect_gazelle")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 
 # Links the full node_modules tree + the pnpm package store
 # (bazel-bin/node_modules/.aspect_rules_js) at the workspace root.
 npm_link_all_packages()
-
-# Gazelle: auto-generate & verify the fine-grained `ts_project` leaf targets from
-# the TS source graph. Scoped on purpose (extra_args) to packages/ui/src/utils —
-# the shared-library leaves that drive selective caching — so it owns the part
-# that benefits most from automation and never rewrites the hand-authored app
-# harnesses or the npm_package. `bazel run //:gazelle` updates BUILD files;
-# `bazel run //:gazelle.check` (diff mode) fails CI if they're stale.
-#
-# End-game note: in a full migration you'd drop the scope and let Gazelle manage
-# EVERY package — it also generates the npm_package targets, which would remove
-# the hand-written cross-boundary `filegroup` plumbing in packages/ui entirely.
-aspect_gazelle(
-    name = "gazelle",
-    languages = ["js"],
-    extra_args = ["packages/ui/src/utils"],
-    with_check = True,
-)
 
 # Files referenced by MODULE.bazel extensions and downstream rules.
 exports_files([

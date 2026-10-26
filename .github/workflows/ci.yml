@@ -33,10 +33,16 @@ jobs:
           node-version-file: .nvmrc
       - name: Check deployment reuse behavior
         run: node --test scripts/test_vercel_reuse.cjs
-      - name: Install Bazelisk and browser system libraries
+      - name: Install Bazelisk
+        run: npm install -g @bazel/bazelisk
+      # Only browser tests that actually execute need these libraries, and the
+      # runner image already ships most of them for its preinstalled Chrome.
+      # Install in the background so a slow package mirror never blocks a run
+      # whose browser results come from cache.
+      - name: Start installing browser system libraries
         run: |
-          npm install -g @bazel/bazelisk
-          npx --yes playwright@1.61.0 install-deps chromium
+          (npx --yes playwright@1.61.0 install-deps chromium > "$RUNNER_TEMP/browser-deps.log" 2>&1
+           echo $? > "$RUNNER_TEMP/browser-deps.status") &
       - name: Configure cache access
         env:
           PUBLIC_CACHE: ${{ vars.BAZEL_REMOTE_PUBLIC_READ }}
@@ -56,15 +62,29 @@ jobs:
             bazel-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel.lock', 'pnpm-lock.yaml') }}-
             bazel-${{ runner.os }}-${{ runner.arch }}-
             bazel-${{ runner.os }}-
-      - name: Build and test deployable artifacts
-        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET"
-      - name: Save successful build cache
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .bazel-cache
-            ~/.bazel-repo
-          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Note the restored cache entries
+        run: |
+          mkdir -p .bazel-cache
+          find .bazel-cache -type f | wc -l > "$RUNNER_TEMP/cache-entries"
+      - name: Build, then run checks that need no browser
+        run: python3 scripts/bazel.py test //... --test_tag_filters=-browser --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/checks.exec.json"
+      # Bazel never caches a failed test, so a retry after the libraries arrive
+      # runs the browser tests again. A real failure still fails the retry.
+      - name: Run browser tests against the deployment archives
+        run: |
+          test_browser() {
+            python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" \
+              --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/browser-$1.exec.json"
+          }
+          test_browser first && exit 0
+          echo "::notice::Retrying browser tests after their system libraries finish installing."
+          while [ ! -f "$RUNNER_TEMP/browser-deps.status" ]; do sleep 2; done
+          tail -n 3 "$RUNNER_TEMP/browser-deps.log"
+          [ "$(cat "$RUNNER_TEMP/browser-deps.status")" = 0 ] || exit 1
+          test_browser retry
+      - name: Summarize what ran and what came from cache
+        if: always()
+        run: python3 scripts/ci-summary.py "$RUNNER_TEMP"/checks.exec.json "$RUNNER_TEMP"/browser-*.exec.json
       - name: Package the tested artifacts
         run: |
           mkdir -p artifacts
@@ -81,14 +101,29 @@ jobs:
       - name: Populate preview cache from trusted main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define=deploy_env=preview
-      - name: Save preview cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # Every save uploads the whole cache and counts against the repository's
+      # cache quota. Skip the upload when Bazel stored nothing new, and drop
+      # entries no run has read for a week. Bazel refreshes an entry's timestamp
+      # when it reads it, and the cache archive keeps those timestamps.
+      - name: Drop cache entries unused for a week
+        id: trim
+        run: |
+          before=$(cat "$RUNNER_TEMP/cache-entries")
+          after=$(find .bazel-cache -type f | wc -l)
+          if [ "$after" -gt "$before" ]; then
+            find .bazel-cache -type f -mtime +7 -delete
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          fi
+          kept=$(find .bazel-cache -type f | wc -l)
+          echo "Cache entries: $before restored, $((after - before)) new, $kept kept." >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the build cache
+        if: steps.trim.outputs.save == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             .bazel-cache
             ~/.bazel-repo
-          key: ${{ steps.cache.outputs.cache-primary-key }}-preview
+          key: ${{ steps.cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -96,36 +131,21 @@ jobs:
           path: bazel-testlogs/packages/*-e2e/test/
           if-no-files-found: ignore
 
-  typecheck:
-    name: Application type checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: typecheck-${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter web --filter docs --filter @repo/ui check-types
-
   deploy:
     name: Deploy tested ${{ matrix.app }} artifact
-    needs: [bazel, typecheck]
-    # Enable after configuring the account. Fork PRs never receive deployment
-    # credentials. The bazel branch preview deploys on push to avoid duplicates.
+    needs: [bazel]
+    # Fork PRs never receive deployment credentials. The bazel branch preview
+    # deploys on push to avoid duplicates. Whether deployment is configured is
+    # checked inside the job, where environment settings are visible.
     if: >-
-      vars.VERCEL_DEPLOY_ENABLED == '1' &&
-      (github.event_name == 'push' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        github.head_ref != 'bazel'))
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.head_ref != 'bazel')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
+      # Apps deploy independently, so one app's failure never cancels another's.
+      fail-fast: false
       matrix:
         app: [web, docs]
     concurrency:
@@ -133,19 +153,55 @@ jobs:
       cancel-in-progress: false
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
+      # Settings can live on the repository or on the preview and production
+      # environments. This reports what is missing without printing any value.
+      - name: Check the deployment setup
+        id: setup
+        env:
+          ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+          ENABLED: ${{ vars.VERCEL_DEPLOY_ENABLED == '1' }}
+          ORG_ID: ${{ vars.VERCEL_ORG_ID != '' }}
+          # An index lookup stays empty for a missing variable. The `a && b || c`
+          # form would fall through to the other app's project.
+          PROJECT_ID: ${{ vars[format('VERCEL_{0}_PROJECT_ID', matrix.app == 'web' && 'WEB' || 'DOCS')] != '' }}
+          TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+          BYPASS: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] != '' }}
+          PROJECT_ID_NAME: VERCEL_${{ matrix.app == 'web' && 'WEB' || 'DOCS' }}_PROJECT_ID
+          BYPASS_NAME: VERCEL_${{ matrix.app == 'web' && 'WEB' || 'DOCS' }}_BYPASS_SECRET
+        run: |
+          missing=""
+          [ "$ENABLED" = true ] || missing="$missing VERCEL_DEPLOY_ENABLED=1"
+          [ "$ORG_ID" = true ] || missing="$missing VERCEL_ORG_ID"
+          [ "$PROJECT_ID" = true ] || missing="$missing $PROJECT_ID_NAME"
+          [ "$TOKEN" = true ] || missing="$missing VERCEL_TOKEN"
+          if [ -n "$missing" ]; then
+            line="Vercel deployment is off for $ENVIRONMENT. Missing:$missing."
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            line="Vercel deployment is on for $ENVIRONMENT."
+            [ "$BYPASS" = true ] || line="$line Add $BYPASS_NAME to check the live deployment."
+          fi
+          echo "$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
+        if: steps.setup.outputs.deploy == 'true'
       - uses: pnpm/action-setup@v4
+        if: steps.setup.outputs.deploy == 'true'
       - uses: actions/setup-node@v4
+        if: steps.setup.outputs.deploy == 'true'
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: steps.setup.outputs.deploy == 'true'
       - uses: actions/download-artifact@v4
+        if: steps.setup.outputs.deploy == 'true'
         with:
           name: vercel-output
           path: artifacts
       - name: Check that this commit is still current
         id: current
+        if: steps.setup.outputs.deploy == 'true'
         run: |
           latest=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
           if [ "$latest" = "$GITHUB_SHA" ]; then
@@ -154,13 +210,23 @@ jobs:
             echo 'Skipping deployment for a superseded or deleted ref.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Deploy without rebuilding
+        id: deploy
         if: steps.current.outputs.deploy == 'true'
         env:
           APP: ${{ matrix.app }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ matrix.app == 'web' && vars.VERCEL_WEB_PROJECT_ID || vars.VERCEL_DOCS_PROJECT_ID }}
+          VERCEL_PROJECT_ID: ${{ vars[format('VERCEL_{0}_PROJECT_ID', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
           DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
           DEPLOY_SCOPE: ${{ github.repository }}:${{ github.ref }}
           VERCEL_FORCE_DEPLOY: ${{ vars.VERCEL_FORCE_DEPLOY }}
         run: node scripts/deploy-vercel.cjs "artifacts/$APP.tar" "$DEPLOY_TARGET"
+      # Compares the live deployment, reused or new, with the archive the browser
+      # tests passed. Protected deployments need the automation bypass secret.
+      - name: Compare the deployment with the tested archive
+        if: steps.deploy.outputs.url
+        env:
+          APP: ${{ matrix.app }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
+        run: node tools/bazel/check-deployment.cjs "artifacts/$APP.tar" "$DEPLOYMENT_URL"

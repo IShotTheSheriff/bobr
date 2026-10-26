@@ -47,6 +47,8 @@ function deploymentKey({
   envs.sort((a, b) => a.id.localeCompare(b.id));
   const settings = { ...project };
   // Deployment history changes after an upload without changing project settings.
+  // Vercel applies protection bypass secrets to every deployment at request
+  // time, so adding or rotating one must not force a redeploy.
   for (const name of [
     "latestDeployments",
     "targets",
@@ -54,10 +56,11 @@ function deploymentKey({
     "lastRollbackTarget",
     "updatedAt",
     "env",
+    "protectionBypass",
   ])
     delete settings[name];
   return digest({
-    version: 1,
+    version: 2,
     artifact,
     settings,
     envs,

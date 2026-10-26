@@ -28,9 +28,24 @@ The local Vercel CLI authenticated to the intended account and created these
 projects. Its credentials are separate from the Vercel connector and GitHub
 Actions. Do not put tokens in chat or in this repository.
 
-The team and both project IDs are configured as Actions variables on
-`ernest-oneteam/bobr`, where CI runs. Add a deployment token as `VERCEL_TOKEN`,
-then set `VERCEL_DEPLOY_ENABLED=1`. Deployment remains disabled until then.
+CI runs on `IShotTheSheriff/bobr`. Set the values below there; the earlier CI
+fork, `ernest-oneteam/bobr`, holds only the team and project IDs. Create the
+token in the Vercel team settings and store it only as a GitHub secret.
+Deployment remains disabled until `VERCEL_DEPLOY_ENABLED=1`.
+
+Store these settings on the repository, or on the GitHub environments the
+deploy job uses: `preview` for branches and PRs, `production` for `main`.
+Environment settings take precedence and let `production` require `main` or a
+reviewer. With per-environment settings, add them to both environments; each
+deploy job reports in the run summary which settings its environment is missing.
+
+```sh
+gh variable set VERCEL_ORG_ID --repo IShotTheSheriff/bobr --body team_741BpS6ntDg8vt3g4Mb4VW3d
+gh variable set VERCEL_WEB_PROJECT_ID --repo IShotTheSheriff/bobr --body prj_k3tVj5hvQzFRwqH0ZKaVeAbNkLT5
+gh variable set VERCEL_DOCS_PROJECT_ID --repo IShotTheSheriff/bobr --body prj_huSklU0QuBfsObtmU9zKxWhuAB93
+gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr   # paste the token at the prompt
+gh variable set VERCEL_DEPLOY_ENABLED --repo IShotTheSheriff/bobr --body 1
+```
 
 | Setting                  | Kind     | Value                             |
 | ------------------------ | -------- | --------------------------------- |
@@ -43,6 +58,20 @@ then set `VERCEL_DEPLOY_ENABLED=1`. Deployment remains disabled until then.
 Pushes to `main` build and deploy production artifacts. The `bazel` branch and
 same-repository PRs build previews. Fork PRs build and test without deployment
 credentials. GitHub environments are named `preview` and `production`.
+
+Both projects use Vercel Authentication for every deployment URL except custom
+domains. People outside the Vercel team, and scripts without a bypass secret,
+get a login page instead of the app. Locally, `vercel curl` sends authenticated
+requests to a protected deployment.
+
+After each deploy or reuse, CI compares the live URL with the archive the
+browser tests passed. `tools/bazel/check-deployment.cjs` serves that archive
+locally and requests `/`, `/demo`, `/api/hello`, a missing page and the home
+page's static assets from both. Status codes, page titles and API bodies must
+match, and every asset must load. To let CI through Vercel Authentication,
+create a "Protection Bypass for Automation" secret in each project and store
+them as `VERCEL_WEB_BYPASS_SECRET` and `VERCEL_DOCS_BYPASS_SECRET` repository
+secrets. Without them, the check reports that it skipped.
 
 The deployment script checks the artifact target and requires Linux x64 with
 Node 24. Preview and production are separate Bazel configurations through
@@ -96,8 +125,10 @@ fresh Linux client with the disk cache disabled and inspect remote-cache hits.
 The local HTTP experiment proves cache restoration between independent Bazel
 clients. It does not prove the selected provider's authentication or eviction
 policy. The local artifact tests do not emulate all Vercel routing, protection,
-edge features or runtime settings. Production deployment and hosted smoke tests
-remain pending until the deployment credential is configured and CI deploys.
+edge features or runtime settings. Preview deployment and reuse passed on
+Vercel on 2026-10-26; production deploys start when the branch reaches `main`.
+Vercel makes a project's first deployment production unless the request names
+a target, so preview deploys pass `--target preview`.
 
 An unaffected commit reuses the artifact and browser result. The deployment
 script also searches for a successful deployment with the same archive, project

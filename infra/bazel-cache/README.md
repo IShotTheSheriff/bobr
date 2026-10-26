@@ -91,11 +91,11 @@ If credentials were generated on the VM, transfer the header files privately fir
 Do not paste their contents into terminal commands, logs or chat.
 
 ```sh
-gh variable set BAZEL_REMOTE_CACHE --repo ernest-oneteam/bobr \
+gh variable set BAZEL_REMOTE_CACHE --repo IShotTheSheriff/bobr \
   --body 'https://cache.example.com'
-gh secret set BAZEL_REMOTE_READ_HEADER --repo ernest-oneteam/bobr \
+gh secret set BAZEL_REMOTE_READ_HEADER --repo IShotTheSheriff/bobr \
   < .secrets/reader.header
-gh secret set BAZEL_REMOTE_WRITE_HEADER --repo ernest-oneteam/bobr \
+gh secret set BAZEL_REMOTE_WRITE_HEADER --repo IShotTheSheriff/bobr \
   < .secrets/writer.header
 ```
 

@@ -115,7 +115,9 @@ async function main() {
           `bobrKey=${key || randomUUID()}`,
           "--meta",
           `bobrScope=${scope}`,
-          ...(target === "production" ? ["--prod"] : []),
+          // Without an explicit target, Vercel makes a project's first
+          // deployment production, even from a preview build.
+          ...(target === "production" ? ["--prod"] : ["--target", "preview"]),
         ],
         {
           cwd,
@@ -131,13 +133,15 @@ async function main() {
       if (!/^https:\/\/[a-zA-Z0-9.-]+\.vercel\.app$/.test(url))
         throw new Error("Missing Vercel deployment URL");
       const deployed = await api(`/v13/deployments/${new URL(url).hostname}`);
-      if (
-        deployed?.readyState !== "READY" ||
-        deployed.aliasError ||
-        deployed.projectId !== projectId ||
-        (deployed.target || "preview") !== target
-      )
-        throw new Error("Deployment is not ready");
+      const problems = [
+        deployed?.readyState !== "READY" && `state ${deployed?.readyState}`,
+        deployed?.aliasError && "alias error",
+        deployed?.projectId !== projectId && "another project",
+        (deployed?.target || "preview") !== target &&
+          `target ${deployed?.target || "preview"}, expected ${target}`,
+      ].filter(Boolean);
+      if (problems.length)
+        throw new Error(`Deployment ${url} failed checks: ${problems.join("; ")}`);
       console.log(`Created ${target} deployment: ${url}`);
     }
     if (process.env.GITHUB_OUTPUT)

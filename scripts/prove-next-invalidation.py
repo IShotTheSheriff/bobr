@@ -176,7 +176,9 @@ def main():
     component = checkout / "packages/ui/src/proof-utils.tsx"
     component.write_text('import /* comment */ "./utils";\nexport const add = (a: number, b: number = 0) => a + b + 13;\nexport const sub = (a: number, b: number = 0) => a - b - 6;\n')
     for app in APPS:
-        for file in (checkout / "apps" / app / "app").rglob("*.tsx"):
+        for file in (checkout / "apps" / app).rglob("*.ts*"):
+            if "node_modules" in file.parts:
+                continue
             text = file.read_text()
             if "@repo/ui/utils" in text:
                 file.write_text(text.replace("@repo/ui/utils", "@repo/ui/proof-utils"))

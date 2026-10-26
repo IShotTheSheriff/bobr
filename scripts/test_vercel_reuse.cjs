@@ -48,7 +48,7 @@ test("artifact, settings, secret rotation, scope, CLI and target changes require
   }
 });
 
-test("deployment history and object key order do not change identity", () => {
+test("deployment history, bypass secrets and object key order do not change identity", () => {
   const input = inputs();
   input.project = {
     updatedAt: 2,
@@ -56,6 +56,7 @@ test("deployment history and object key order do not change identity", () => {
     id: "project",
     targets: { production: "other" },
     latestDeployments: ["new"],
+    protectionBypass: { "bypass-secret": { scope: "automation-bypass" } },
   };
   assert.equal(deploymentKey(input), deploymentKey(inputs()));
 });
