@@ -164,12 +164,13 @@ GitHub Actions on `IShotTheSheriff/bobr` deployed the Bazel-tested archives to
 the `bobr-web` and `bobr-docs` projects on 2026-10-26. Settings live on the
 `preview` and `production` GitHub environments.
 
-| Commit                | Web     | Docs                        | Run                                                                             |
-| --------------------- | ------- | --------------------------- | ------------------------------------------------------------------------------- |
-| First preview deploy  | created | created                     | [40367521569](https://github.com/IShotTheSheriff/bobr/actions/runs/40367521569) |
-| Archives unchanged    | reused  | reused                      | [40368089412](https://github.com/IShotTheSheriff/bobr/actions/runs/40368089412) |
-| Body of `sub` only    | reused  | new deployment              | [40369026997](https://github.com/IShotTheSheriff/bobr/actions/runs/40369026997) |
-| Revert of that change | reused  | reused its first deployment | [40369528742](https://github.com/IShotTheSheriff/bobr/actions/runs/40369528742) |
+| Commit                | Web                | Docs                        | Run                                                                             |
+| --------------------- | ------------------ | --------------------------- | ------------------------------------------------------------------------------- |
+| First preview deploy  | created            | created                     | [40367521569](https://github.com/IShotTheSheriff/bobr/actions/runs/40367521569) |
+| Archives unchanged    | reused             | reused                      | [40368089412](https://github.com/IShotTheSheriff/bobr/actions/runs/40368089412) |
+| Body of `sub` only    | reused             | new deployment              | [40369026997](https://github.com/IShotTheSheriff/bobr/actions/runs/40369026997) |
+| Revert of that change | reused             | reused its first deployment | [40369528742](https://github.com/IShotTheSheriff/bobr/actions/runs/40369528742) |
+| Merge into `main`     | created production | created production          | [40371556470](https://github.com/IShotTheSheriff/bobr/actions/runs/40371556470) |
 
 Vercel accepted each archive as prebuilt output, and the deployments were ready
 in about 10 seconds. Between deploys, only `latestDeployments` and `targets`
@@ -185,10 +186,10 @@ Still open:
 - Both projects require Vercel Authentication, which answers with a redirect to
   Vercel's login. The live comparison with the tested archive reports a skip
   until each project's automation bypass secret is stored in GitHub.
-- Production deploys start when this branch merges into `main`. The first one
-  replaces the preview build that Vercel promoted for `bobr-web`. Production
-  reuse must refer to the current deployment after a rollback, which the unit
-  tests cover but no hosted run has exercised.
+- The merge into `main` deployed production for both apps and replaced the
+  preview build that Vercel had promoted for `bobr-web`. Production reuse must
+  refer to the current deployment after a rollback, which the unit tests cover
+  but no hosted run has exercised.
 - The self-hosted cache passed its acceptance test on GitHub Actions
   ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
   with separate producer, read-only consumer and next-commit clients. The AWS
