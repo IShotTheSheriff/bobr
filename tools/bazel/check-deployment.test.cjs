@@ -52,10 +52,11 @@ async function deployed(t, file) {
   return server.url;
 }
 
-// Vercel Authentication answers 401 unless the automation bypass header matches.
-function protect(t, target, secret) {
+// Vercel Authentication redirects to its login unless the bypass header matches.
+function protect(t, target, secret, denied = { location: "https://vercel.com/sso-api?url=x" }) {
   const server = http.createServer((req, res) => {
-    if (req.headers["x-vercel-protection-bypass"] !== secret) return res.writeHead(401).end();
+    if (req.headers["x-vercel-protection-bypass"] !== secret)
+      return res.writeHead(denied.location ? 302 : 401, denied).end();
     const upstream = http.request(
       new URL(req.url, target),
       { method: req.method, headers: req.headers },
@@ -86,12 +87,17 @@ test("a deployment that serves different content fails", async (t) => {
   assert.deepEqual(result.problems, ["/api/hello: body differs from the tested archive"]);
 });
 
-test("a protected deployment is skipped without a bypass secret", async (t) => {
-  const file = archive(t, "hello web");
-  const url = await protect(t, await deployed(t, file), "secret");
-  const result = await checkDeployment(file, url);
-  assert.match(result.skipped, /VERCEL_AUTOMATION_BYPASS_SECRET/);
-});
+for (const [name, denied] of [
+  ["a redirect to Vercel's login", undefined],
+  ["401", {}],
+]) {
+  test(`a protected deployment answering ${name} is skipped without a bypass secret`, async (t) => {
+    const file = archive(t, "hello web");
+    const url = await protect(t, await deployed(t, file), "secret", denied);
+    const result = await checkDeployment(file, url);
+    assert.match(result.skipped, /VERCEL_AUTOMATION_BYPASS_SECRET/);
+  });
+}
 
 test("the bypass secret reaches a protected deployment", async (t) => {
   const file = archive(t, "hello web");

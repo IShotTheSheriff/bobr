@@ -36,8 +36,21 @@ async function get(base, route, headers = {}) {
   return {
     status: response.status,
     type: response.headers.get("content-type") || "",
+    location: response.headers.get("location") || "",
     body: await response.text(),
   };
+}
+
+// Vercel Authentication answers with a redirect to its login service, while
+// other protection modes answer 401 or 403.
+function requiresLogin({ status, location }) {
+  if (status === 401 || status === 403) return true;
+  if (status < 300 || status >= 400 || !location) return false;
+  try {
+    return /(^|\.)vercel\.com$/.test(new URL(location).hostname);
+  } catch {
+    return false;
+  }
 }
 
 const title = (html) => html.match(/<title>([^<]*)<\/title>/)?.[1];
@@ -45,7 +58,7 @@ const title = (html) => html.match(/<title>([^<]*)<\/title>/)?.[1];
 async function checkDeployment(archive, deployment, { bypass } = {}) {
   const headers = bypass ? { "x-vercel-protection-bypass": bypass } : {};
   const first = await get(deployment, "/", headers);
-  if ([401, 403].includes(first.status) && !bypass)
+  if (requiresLogin(first) && !bypass)
     return {
       skipped:
         "The deployment requires Vercel Authentication. Set VERCEL_AUTOMATION_BYPASS_SECRET to check it.",
