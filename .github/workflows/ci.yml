@@ -144,6 +144,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
+      # Apps deploy independently, so one app's failure never cancels another's.
+      fail-fast: false
       matrix:
         app: [web, docs]
     concurrency:
