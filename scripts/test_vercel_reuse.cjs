@@ -57,6 +57,7 @@ test("deployment history, bypass secrets and object key order do not change iden
     targets: { production: "other" },
     latestDeployments: ["new"],
     protectionBypass: { "bypass-secret": { scope: "automation-bypass" } },
+    crons: { deploymentId: "dpl_new", updatedAt: 3, definitions: [] },
   };
   assert.equal(deploymentKey(input), deploymentKey(inputs()));
 });

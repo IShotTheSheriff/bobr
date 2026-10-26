@@ -47,11 +47,14 @@ function deploymentKey({
   envs.sort((a, b) => a.id.localeCompare(b.id));
   const settings = { ...project };
   // Deployment history changes after an upload without changing project settings.
-  // Vercel applies protection bypass secrets to every deployment at request
-  // time, so adding or rotating one must not force a redeploy.
+  // `crons` records the production deployment whose cron jobs run; the jobs
+  // themselves come from the archive. Vercel applies protection bypass secrets
+  // to every deployment at request time, so adding or rotating one must not
+  // force a redeploy.
   for (const name of [
     "latestDeployments",
     "targets",
+    "crons",
     "lastAliasRequest",
     "lastRollbackTarget",
     "updatedAt",
@@ -60,7 +63,7 @@ function deploymentKey({
   ])
     delete settings[name];
   return digest({
-    version: 2,
+    version: 3,
     artifact,
     settings,
     envs,

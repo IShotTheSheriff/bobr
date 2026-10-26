@@ -164,12 +164,15 @@ GitHub Actions on `IShotTheSheriff/bobr` deployed the Bazel-tested archives to
 the `bobr-web` and `bobr-docs` projects on 2026-10-26. Settings live on the
 `preview` and `production` GitHub environments.
 
-| Commit                | Web     | Docs                        | Run                                                                             |
-| --------------------- | ------- | --------------------------- | ------------------------------------------------------------------------------- |
-| First preview deploy  | created | created                     | [40367521569](https://github.com/IShotTheSheriff/bobr/actions/runs/40367521569) |
-| Archives unchanged    | reused  | reused                      | [40368089412](https://github.com/IShotTheSheriff/bobr/actions/runs/40368089412) |
-| Body of `sub` only    | reused  | new deployment              | [40369026997](https://github.com/IShotTheSheriff/bobr/actions/runs/40369026997) |
-| Revert of that change | reused  | reused its first deployment | [40369528742](https://github.com/IShotTheSheriff/bobr/actions/runs/40369528742) |
+| Commit                    | Web                                   | Docs                                  | Run                                                                             |
+| ------------------------- | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
+| First preview deploy      | created                               | created                               | [40367521569](https://github.com/IShotTheSheriff/bobr/actions/runs/40367521569) |
+| Archives unchanged        | reused                                | reused                                | [40368089412](https://github.com/IShotTheSheriff/bobr/actions/runs/40368089412) |
+| Body of `sub` only        | reused                                | new deployment                        | [40369026997](https://github.com/IShotTheSheriff/bobr/actions/runs/40369026997) |
+| Revert of that change     | reused                                | reused its first deployment           | [40369528742](https://github.com/IShotTheSheriff/bobr/actions/runs/40369528742) |
+| Merge into `main`         | created production                    | created production                    | [40371556470](https://github.com/IShotTheSheriff/bobr/actions/runs/40371556470) |
+| Docs edit on `main`       | created production, live check passed | created production, live check passed | [40373598068](https://github.com/IShotTheSheriff/bobr/actions/runs/40373598068) |
+| Reuse key ignores `crons` | created production, live check passed | created production, live check passed | [40374236995](https://github.com/IShotTheSheriff/bobr/actions/runs/40374236995) |
 
 Vercel accepted each archive as prebuilt output, and the deployments were ready
 in about 10 seconds. Between deploys, only `latestDeployments` and `targets`
@@ -180,15 +183,20 @@ from `bazel` became `bobr-web`'s production deployment; preview deploys now pass
 `--target preview`. The deploy matrix also cancelled docs when web failed; apps
 now deploy independently.
 
+The live check passes for production. With each project's automation bypass
+secret, it requested `/`, `/demo`, `/api/hello`, a missing page and five static
+assets from both apps, and every status, title and API body matched the tested
+archive. The docs edit on `main` should have reused both production deployments
+but created new ones. The project's `crons` record stores the current
+production deployment's ID, so the reuse key changed with every production
+deploy. The key now ignores it.
+
 Still open:
 
-- Both projects require Vercel Authentication, which answers with a redirect to
-  Vercel's login. The live comparison with the tested archive reports a skip
-  until each project's automation bypass secret is stored in GitHub.
-- Production deploys start when this branch merges into `main`. The first one
-  replaces the preview build that Vercel promoted for `bobr-web`. Production
-  reuse must refer to the current deployment after a rollback, which the unit
-  tests cover but no hosted run has exercised.
+- The merge into `main` deployed production for both apps and replaced the
+  preview build that Vercel had promoted for `bobr-web`. Production reuse must
+  refer to the current deployment after a rollback, which the unit tests cover
+  but no hosted run has exercised.
 - The self-hosted cache passed its acceptance test on GitHub Actions
   ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
   with separate producer, read-only consumer and next-commit clients. The AWS
