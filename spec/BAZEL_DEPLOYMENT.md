@@ -125,8 +125,10 @@ fresh Linux client with the disk cache disabled and inspect remote-cache hits.
 The local HTTP experiment proves cache restoration between independent Bazel
 clients. It does not prove the selected provider's authentication or eviction
 policy. The local artifact tests do not emulate all Vercel routing, protection,
-edge features or runtime settings. Production deployment and hosted smoke tests
-remain pending until the deployment credential is configured and CI deploys.
+edge features or runtime settings. Preview deployment and reuse passed on
+Vercel on 2026-10-26; production deploys start when the branch reaches `main`.
+Vercel makes a project's first deployment production unless the request names
+a target, so preview deploys pass `--target preview`.
 
 An unaffected commit reuses the artifact and browser result. The deployment
 script also searches for a successful deployment with the same archive, project

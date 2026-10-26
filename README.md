@@ -157,8 +157,9 @@ can skip the experiment.
 
 See [the setup guide](spec/BAZEL_DEPLOYMENT.md) for the shared cache, Vercel
 account and GitHub configuration. CI packages the tested Linux artifact and
-can deploy it without another build. Deployment stays disabled until the
-repository has the Vercel token and project settings.
+deploys it without another build: previews from branches and PRs, production
+from `main`. An app whose archive did not change keeps its existing deployment,
+so a shared-code change that only docs uses deploys only docs.
 
 The selected shared cache is self-hosted on AWS. Its
 [EC2 and Docker setup](infra/bazel-cache/README.md) includes automatic HTTPS,

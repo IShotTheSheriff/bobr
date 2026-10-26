@@ -16,15 +16,16 @@ work, and Vercel should deploy the tested artifact.
 | Reuse nondeterministic Next output   | Bazel reuses the stored action output when projected inputs match. It never compares two independently rebuilt Next outputs to decide reuse.                                                                          |
 | Share build results                  | Normal package commands and CI use the shared-cache wrapper. Fresh clients restore Next and browser actions through the actual Caddy/bazel-remote stack with disk caching disabled. AWS provisioning remains pending. |
 | Preserve browser coverage            | Two Bazel targets test the deployment archive, covering hydration, interaction, navigation, API and 404 behavior.                                                                                                     |
-| Deploy the tested artifact           | Bazel creates the Vercel archive; CI tests, uploads and deploys it with `--prebuilt`. The intended Vercel projects exist; hosted deployment awaits its CI credential.                                                 |
-| Avoid duplicate deployments          | Reuse checks match archive bytes, settings, environment versions and PR scope against a ready deployment. Unit tests pass; hosted verification remains pending.                                                       |
+| Deploy the tested artifact           | Bazel creates the Vercel archive; CI tests, uploads and deploys it with `--prebuilt`. Previews from the `bazel` branch deployed to both Vercel projects on 2026-10-26.                                                |
+| Avoid duplicate deployments          | Reuse checks match archive bytes, settings, environment versions and branch scope against a ready deployment. Hosted runs reused unchanged apps and created a deployment only for the app whose archive changed.      |
 | Avoid manual hashes                  | Bazel owns action keys. The browser pin updater generates download hashes. Evidence hashes are assertions, not build inputs maintained by developers.                                                                 |
 | Avoid build-rule edits               | `next_app()` and `shared_package()` take inputs from each package's files and npm links from `pnpm-lock.yaml`. New pages, folders, utilities, tests and npm dependencies need no BUILD change.                        |
 | Cache every check                    | Type checks, lint and unit tests are Bazel tests. App type checks read declarations for the UI exports they name. Unit tests read an esbuild bundle of the code they reach.                                           |
 
-The code addresses the four open implementation areas. Hosted cache access,
-Vercel routing and production deployment are not established by local tests.
-Keep the PR a draft until the chosen account and provider pass those checks.
+The code addresses the four open implementation areas. Preview deployment and
+reuse are verified on Vercel; see [Hosted deployment](#hosted-deployment).
+Production deployment starts on `main`, and the hosted cache waits for the AWS
+host.
 
 ## Verification on 2026-10-23
 
@@ -157,28 +158,38 @@ introduced. Preview and production already select separate action environments.
 Deploy credentials and account linkage stay outside the cached build. A fixed
 Next build ID reduces churn but is not a content-derived deployment identifier.
 
-## Hosted acceptance still required
+## Hosted deployment
 
-Verified without deploying: the Vercel API returns the project, account and
-deployment-list shapes that `deploy-vercel.cjs` and its reuse search rely on,
-and both projects have no shared environment variables, so the reuse key is
-computed. The self-hosted cache acceptance passed on GitHub Actions
-([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
-with separate producer, read-only consumer and next-commit clients. After each
-deploy or reuse, CI now compares the live URL with the tested archive; against
-local servers of the real archives, that check passes for each app and reports
-every route, title, API body and asset that differs when the apps are swapped.
-No deployment exists yet, because deployment needs the token below.
+GitHub Actions on `IShotTheSheriff/bobr` deployed the Bazel-tested archives to
+the `bobr-web` and `bobr-docs` projects on 2026-10-26. Settings live on the
+`preview` and `production` GitHub environments.
 
-The `bobr-web` and `bobr-docs` projects exist under `0xVentures`. CI now runs on
-`IShotTheSheriff/bobr`, so the project IDs, deployment credential and deploy
-switch belong there. Follow [the setup guide](BAZEL_DEPLOYMENT.md) to add them
-and configure the chosen shared cache. Then verify preview and production
-separately, including the runtime behavior of both apps.
+| Commit                | Web     | Docs                        | Run                                                                             |
+| --------------------- | ------- | --------------------------- | ------------------------------------------------------------------------------- |
+| First preview deploy  | created | created                     | [40367521569](https://github.com/IShotTheSheriff/bobr/actions/runs/40367521569) |
+| Archives unchanged    | reused  | reused                      | [40368089412](https://github.com/IShotTheSheriff/bobr/actions/runs/40368089412) |
+| Body of `sub` only    | reused  | new deployment              | [40369026997](https://github.com/IShotTheSheriff/bobr/actions/runs/40369026997) |
+| Revert of that change | reused  | reused its first deployment | [40369528742](https://github.com/IShotTheSheriff/bobr/actions/runs/40369528742) |
 
-Use consecutive PR commits to check unused-export reuse, used-export rebuilding
-and effect invalidation through the configured provider. Check a clean Linux
-client with local caches disabled. Confirm that an unaffected commit reuses the
-existing deployment URL and that artifact or runtime configuration changes create
-a new deployment. Production reuse must refer to the current deployment after a
-rollback. Missing environment revision metadata deliberately disables reuse.
+Vercel accepted each archive as prebuilt output, and the deployments were ready
+in about 10 seconds. Between deploys, only `latestDeployments` and `targets`
+changed in the project records, and the reuse key ignores both. The first
+attempt exposed two problems, now fixed. Vercel makes a project's first
+deployment production unless the request names a target, so a preview build
+from `bazel` became `bobr-web`'s production deployment; preview deploys now pass
+`--target preview`. The deploy matrix also cancelled docs when web failed; apps
+now deploy independently.
+
+Still open:
+
+- Both projects require Vercel Authentication, which answers with a redirect to
+  Vercel's login. The live comparison with the tested archive reports a skip
+  until each project's automation bypass secret is stored in GitHub.
+- Production deploys start when this branch merges into `main`. The first one
+  replaces the preview build that Vercel promoted for `bobr-web`. Production
+  reuse must refer to the current deployment after a rollback, which the unit
+  tests cover but no hosted run has exercised.
+- The self-hosted cache passed its acceptance test on GitHub Actions
+  ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
+  with separate producer, read-only consumer and next-commit clients. The AWS
+  host itself is not provisioned, so CI uses the GitHub Actions cache.
