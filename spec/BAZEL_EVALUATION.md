@@ -173,6 +173,8 @@ the `bobr-web` and `bobr-docs` projects on 2026-10-26. Settings live on the
 | Merge into `main`         | created production                    | created production                    | [40371556470](https://github.com/IShotTheSheriff/bobr/actions/runs/40371556470) |
 | Docs edit on `main`       | created production, live check passed | created production, live check passed | [40373598068](https://github.com/IShotTheSheriff/bobr/actions/runs/40373598068) |
 | Reuse key ignores `crons` | created production, live check passed | created production, live check passed | [40374236995](https://github.com/IShotTheSheriff/bobr/actions/runs/40374236995) |
+| Docs edit after the fix   | reused production, live check passed  | reused production, live check passed  | [40374730840](https://github.com/IShotTheSheriff/bobr/actions/runs/40374730840) |
+| Final code on `bazel`     | created preview, live check passed    | created preview, live check passed    | [40375231811](https://github.com/IShotTheSheriff/bobr/actions/runs/40375231811) |
 
 Vercel accepted each archive as prebuilt output, and the deployments were ready
 in about 10 seconds. Between deploys, only `latestDeployments` and `targets`
@@ -189,14 +191,13 @@ assets from both apps, and every status, title and API body matched the tested
 archive. The docs edit on `main` should have reused both production deployments
 but created new ones. The project's `crons` record stores the current
 production deployment's ID, so the reuse key changed with every production
-deploy. The key now ignores it.
+deploy. The key now ignores it, and the next docs edit reused both production
+deployments.
 
 Still open:
 
-- The merge into `main` deployed production for both apps and replaced the
-  preview build that Vercel had promoted for `bobr-web`. Production reuse must
-  refer to the current deployment after a rollback, which the unit tests cover
-  but no hosted run has exercised.
+- After a rollback, production reuse must compare with the deployment Vercel
+  now serves. The unit tests cover this, but no hosted run has exercised it.
 - The self-hosted cache passed its acceptance test on GitHub Actions
   ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
   with separate producer, read-only consumer and next-commit clients. The AWS
