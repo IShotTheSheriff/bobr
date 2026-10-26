@@ -61,7 +61,7 @@ async function checkDeployment(archive, deployment, { bypass } = {}) {
   if (requiresLogin(first) && !bypass)
     return {
       skipped:
-        "The deployment requires Vercel Authentication. Set VERCEL_AUTOMATION_BYPASS_SECRET to check it.",
+        "The deployment requires Vercel Authentication. Add the project's automation bypass secret to check it.",
     };
   const tested = await serve(archive);
   try {

@@ -95,7 +95,7 @@ for (const [name, denied] of [
     const file = archive(t, "hello web");
     const url = await protect(t, await deployed(t, file), "secret", denied);
     const result = await checkDeployment(file, url);
-    assert.match(result.skipped, /VERCEL_AUTOMATION_BYPASS_SECRET/);
+    assert.match(result.skipped, /automation bypass secret/);
   });
 }
 
