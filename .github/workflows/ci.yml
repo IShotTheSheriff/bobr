@@ -26,32 +26,6 @@ jobs:
       DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
       - uses: actions/checkout@v4
-      # Says which deployment settings are missing, without printing any value.
-      - name: Report the Vercel deployment setup
-        env:
-          ENABLED: ${{ vars.VERCEL_DEPLOY_ENABLED == '1' }}
-          ORG_ID: ${{ vars.VERCEL_ORG_ID != '' }}
-          WEB_PROJECT_ID: ${{ vars.VERCEL_WEB_PROJECT_ID != '' }}
-          DOCS_PROJECT_ID: ${{ vars.VERCEL_DOCS_PROJECT_ID != '' }}
-          TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
-          WEB_BYPASS: ${{ secrets.VERCEL_WEB_BYPASS_SECRET != '' }}
-          DOCS_BYPASS: ${{ secrets.VERCEL_DOCS_BYPASS_SECRET != '' }}
-        run: |
-          missing=""
-          [ "$ENABLED" = true ] || missing="$missing VERCEL_DEPLOY_ENABLED=1"
-          [ "$ORG_ID" = true ] || missing="$missing VERCEL_ORG_ID"
-          [ "$WEB_PROJECT_ID" = true ] || missing="$missing VERCEL_WEB_PROJECT_ID"
-          [ "$DOCS_PROJECT_ID" = true ] || missing="$missing VERCEL_DOCS_PROJECT_ID"
-          [ "$TOKEN" = true ] || missing="$missing VERCEL_TOKEN"
-          if [ -n "$missing" ]; then
-            line="Vercel deployment is off. Missing:$missing."
-          elif [ "$WEB_BYPASS" = true ] && [ "$DOCS_BYPASS" = true ]; then
-            line="Vercel deployment is on, and CI checks each live deployment."
-          else
-            line="Vercel deployment is on. Add VERCEL_WEB_BYPASS_SECRET and VERCEL_DOCS_BYPASS_SECRET to check protected deployments."
-          fi
-          echo "$line"
-          echo "$line" >> "$GITHUB_STEP_SUMMARY"
       - name: Check CI helper behavior
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - uses: actions/setup-node@v4
@@ -160,13 +134,13 @@ jobs:
   deploy:
     name: Deploy tested ${{ matrix.app }} artifact
     needs: [bazel]
-    # Enable after configuring the account. Fork PRs never receive deployment
-    # credentials. The bazel branch preview deploys on push to avoid duplicates.
+    # Fork PRs never receive deployment credentials. The bazel branch preview
+    # deploys on push to avoid duplicates. Whether deployment is configured is
+    # checked inside the job, where environment settings are visible.
     if: >-
-      vars.VERCEL_DEPLOY_ENABLED == '1' &&
-      (github.event_name == 'push' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        github.head_ref != 'bazel'))
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.head_ref != 'bazel')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -177,19 +151,55 @@ jobs:
       cancel-in-progress: false
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
+      # Settings can live on the repository or on the preview and production
+      # environments. This reports what is missing without printing any value.
+      - name: Check the deployment setup
+        id: setup
+        env:
+          ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+          ENABLED: ${{ vars.VERCEL_DEPLOY_ENABLED == '1' }}
+          ORG_ID: ${{ vars.VERCEL_ORG_ID != '' }}
+          # An index lookup stays empty for a missing variable. The `a && b || c`
+          # form would fall through to the other app's project.
+          PROJECT_ID: ${{ vars[format('VERCEL_{0}_PROJECT_ID', matrix.app == 'web' && 'WEB' || 'DOCS')] != '' }}
+          TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+          BYPASS: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] != '' }}
+          PROJECT_ID_NAME: VERCEL_${{ matrix.app == 'web' && 'WEB' || 'DOCS' }}_PROJECT_ID
+          BYPASS_NAME: VERCEL_${{ matrix.app == 'web' && 'WEB' || 'DOCS' }}_BYPASS_SECRET
+        run: |
+          missing=""
+          [ "$ENABLED" = true ] || missing="$missing VERCEL_DEPLOY_ENABLED=1"
+          [ "$ORG_ID" = true ] || missing="$missing VERCEL_ORG_ID"
+          [ "$PROJECT_ID" = true ] || missing="$missing $PROJECT_ID_NAME"
+          [ "$TOKEN" = true ] || missing="$missing VERCEL_TOKEN"
+          if [ -n "$missing" ]; then
+            line="Vercel deployment is off for $ENVIRONMENT. Missing:$missing."
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            line="Vercel deployment is on for $ENVIRONMENT."
+            [ "$BYPASS" = true ] || line="$line Add $BYPASS_NAME to check the live deployment."
+          fi
+          echo "$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
+        if: steps.setup.outputs.deploy == 'true'
       - uses: pnpm/action-setup@v4
+        if: steps.setup.outputs.deploy == 'true'
       - uses: actions/setup-node@v4
+        if: steps.setup.outputs.deploy == 'true'
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: steps.setup.outputs.deploy == 'true'
       - uses: actions/download-artifact@v4
+        if: steps.setup.outputs.deploy == 'true'
         with:
           name: vercel-output
           path: artifacts
       - name: Check that this commit is still current
         id: current
+        if: steps.setup.outputs.deploy == 'true'
         run: |
           latest=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
           if [ "$latest" = "$GITHUB_SHA" ]; then
@@ -204,8 +214,6 @@ jobs:
           APP: ${{ matrix.app }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          # An index lookup stays empty for a missing variable. The `a && b || c` form
-          # would fall through to the other app's project.
           VERCEL_PROJECT_ID: ${{ vars[format('VERCEL_{0}_PROJECT_ID', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
           DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
           DEPLOY_SCOPE: ${{ github.repository }}:${{ github.ref }}

@@ -33,6 +33,12 @@ fork, `ernest-oneteam/bobr`, holds only the team and project IDs. Create the
 token in the Vercel team settings and store it only as a GitHub secret.
 Deployment remains disabled until `VERCEL_DEPLOY_ENABLED=1`.
 
+Store these settings on the repository, or on the GitHub environments the
+deploy job uses: `preview` for branches and PRs, `production` for `main`.
+Environment settings take precedence and let `production` require `main` or a
+reviewer. With per-environment settings, add them to both environments; each
+deploy job reports in the run summary which settings its environment is missing.
+
 ```sh
 gh variable set VERCEL_ORG_ID --repo IShotTheSheriff/bobr --body team_741BpS6ntDg8vt3g4Mb4VW3d
 gh variable set VERCEL_WEB_PROJECT_ID --repo IShotTheSheriff/bobr --body prj_k3tVj5hvQzFRwqH0ZKaVeAbNkLT5
