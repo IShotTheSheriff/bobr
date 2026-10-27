@@ -219,7 +219,15 @@ minute. The same check in CI's mode used a throwaway signing key. A writer
 uploaded 27 signed files, and a fresh reader with that key restored both Next
 builds and both browser tests (18 hits, 0 misses). A reader with a different
 key ignored the 2 signed action results it found and rebuilt, so Vercel keeps
-the signature header and CI refuses results it did not sign. A login older than the CLI's token lifetime returned HTTP 403, so the
+the signature header and CI refuses results it did not sign.
+
+GitHub Actions repeated the developer path on two separate runners
+([40459620909](https://github.com/IShotTheSheriff/bobr/actions/runs/40459620909)).
+The first, with no disk cache, built the Next apps and their tests and uploaded
+60 files. The second, a fresh runner with no disk cache and no browser
+libraries, restored both Next builds, both browser tests, both type checks and
+both unit tests: 34 hits, 0 misses and 0 of 6 tests run. The workflow
+`vercel-cache.yml` repeats this when the cache code changes and every week. A login older than the CLI's token lifetime returned HTTP 403, so the
 wrapper now runs `vercel whoami`, which renews the login before reading it. If
 the cache is unreachable, the wrapper builds locally instead of failing. The
 self-hosted server in `infra/bazel-cache` remains an alternative and passed its
