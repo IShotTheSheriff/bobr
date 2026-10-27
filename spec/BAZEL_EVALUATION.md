@@ -244,5 +244,10 @@ the current build.
 | Docs edit while rolled back     | Web created `bobr-1sm33vshp` instead of reusing, warned that production still serves the rolled-back deployment and named `vercel promote` | [40468109569](https://github.com/IShotTheSheriff/bobr/actions/runs/40468109569) |
 | `vercel promote bobr-1sm33vshp` | Production serves the tested build again                                                                                                   | local                                                                           |
 
-The live check passed on the new deployment, and docs reused its production
-deployment throughout.
+| First push after the promotion | Web created `bobr-302phqpmt` instead of reusing `bobr-1sm33vshp`, without a warning | [40468413605](https://github.com/IShotTheSheriff/bobr/actions/runs/40468413605) |
+
+The live check passed on each new deployment, and docs reused its production
+deployment throughout. A deployment created while production is rolled back is
+not reused after the promotion: the project record differs during a rollback,
+and the reuse key treats any project setting change as a reason to redeploy.
+That costs one extra deployment and never serves an untested build.
