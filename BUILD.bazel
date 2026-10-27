@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 
 # Links the full node_modules tree + the pnpm package store
@@ -12,3 +13,12 @@ exports_files([
     "pnpm-lock.yaml",
     ".npmrc",
 ])
+
+# A glob never enters a directory that has its own BUILD.bazel, so this only
+# matches workspace packages that Bazel would otherwise skip. The paths are the
+# test's arguments, so a new package changes its cache key.
+js_test(
+    name = "build_files_test",
+    entry_point = "//tools/bazel:check_build_files",
+    args = glob(["apps/*/package.json", "packages/*/package.json"], allow_empty = True),
+)

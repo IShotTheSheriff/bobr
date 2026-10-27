@@ -1,5 +1,7 @@
 # Build Hashing Strategy for Smart Test Runner
 
+Bazel replaced this approach, and `scripts/hash-build.ts` no longer exists. Nobody computes or commits a hash now. See [the README](../README.md).
+
 ## Overview
 This document documents the strategy used in `scripts/hash-build.ts` to achieve deterministic test caching. The goal is to ensure that `e2e:test` tasks only re-run when the *functional* output of a build changes, ignoring volatile build artifacts (like timestamps, build IDs, or metadata manifests).
 

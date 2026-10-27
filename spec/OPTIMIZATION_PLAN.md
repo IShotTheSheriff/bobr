@@ -1,5 +1,7 @@
 # Turborepo & Next.js Build/Test Optimization Plan
 
+Bazel replaced this plan, and its `build.hash` scripts no longer exist. See [the README](../README.md).
+
 ## Problem Analysis
 
 Currently, any change in `@repo/ui` (even unused files like `src/utils/add.ts`) triggers a cache miss for:

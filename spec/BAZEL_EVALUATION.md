@@ -148,7 +148,8 @@ bounded optimizer, not a replacement for Next's own route and React compiler
 analysis.
 
 Routine edits need no rule changes. A new app still needs a copied four-line
-BUILD file, an e2e package and a Vercel project. A new shared package gets its
+BUILD file, an e2e package and a Vercel project. `//:build_files_test` fails
+while any workspace package lacks a BUILD file. A new shared package gets its
 checks from `shared_package()`, but apps consume it as a whole package until the
 projection covers it. `pnpm dev` uses source files directly; `pnpm build` and
 `pnpm test` populate Bazel's production build and test caches.

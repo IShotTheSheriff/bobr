@@ -59,6 +59,12 @@ js_library(
     visibility = ["//visibility:public"],
 )
 
+js_library(
+    name = "check_build_files",
+    srcs = ["check-build-files.cjs"],
+    visibility = ["//visibility:public"],
+)
+
 js_test(
     name = "check_deployment_test",
     entry_point = "check-deployment.test.cjs",

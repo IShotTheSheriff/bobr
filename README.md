@@ -52,7 +52,9 @@ Code and `package.json`. Bazel reads everything else from the files:
 
 Each app's `BUILD.bazel` is four lines that call `next_app()`. A shared package
 calls `shared_package()`. A new app copies `apps/web/BUILD.bazel` and an e2e
-package, and it needs its own Vercel project.
+package, and it needs its own Vercel project. If a package under `apps/` or
+`packages/` has no `BUILD.bazel`, `//:build_files_test` fails and names the file
+to copy. Without that check Bazel would skip the package and CI would still pass.
 
 CI writes a table to each run's summary page that lists the Next builds and
 checks that ran, and the ones Bazel reused from cache.
