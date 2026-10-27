@@ -132,4 +132,16 @@ async function findReusable(api, options) {
   return null;
 }
 
-module.exports = { digest, deploymentKey, reusable, findReusable };
+// After an Instant Rollback, Vercel stops moving production domains to new
+// production deployments until someone promotes one. CI must not undo a
+// person's rollback, so it reports the pin instead.
+function productionPin(project, deployment, url) {
+  const serving = project?.targets?.production?.id;
+  if (!serving || serving === deployment.id) return null;
+  return (
+    `Production still serves ${serving}, for example after a rollback, so ` +
+    `${url} is ready but not live. Run \`vercel promote ${url}\` to serve it.`
+  );
+}
+
+module.exports = { digest, deploymentKey, reusable, findReusable, productionPin };

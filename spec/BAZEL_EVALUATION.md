@@ -236,12 +236,18 @@ acceptance test on GitHub Actions
 
 ## Before calling the project complete
 
-Test production reuse after a rollback on Vercel:
+Test production reuse after a rollback on Vercel. After an
+[Instant Rollback](https://vercel.com/docs/deployments/instant-rollback), Vercel
+stops moving production domains to new production deployments until someone
+promotes one, and CI must not undo that decision.
 
 1. Roll `bobr-web` back to an earlier production deployment, for example with
    `vercel rollback <deployment-url> --scope 0xventures`.
 2. Push a commit to `main` that leaves the web archive unchanged, such as a
    documentation edit.
-3. The web deploy job must report "Created production deployment", not reuse:
-   the deployment Vercel now serves was not built from the tested archive.
-   The live check must pass, and production must serve the tested build again.
+3. The web deploy job must create a production deployment instead of reusing
+   one, because the deployment Vercel serves was not built from the tested
+   archive. It must warn that production still serves the rolled-back
+   deployment and name the `vercel promote` command. The live check must pass.
+4. Promote that deployment, push another documentation edit, and confirm the
+   job reuses it without a warning.

@@ -4,7 +4,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { digest, deploymentKey, findReusable } = require("./vercel-reuse.cjs");
+const {
+  digest,
+  deploymentKey,
+  findReusable,
+  productionPin,
+} = require("./vercel-reuse.cjs");
 
 async function main() {
   const [archive, target] = process.argv.slice(2);
@@ -143,6 +148,18 @@ async function main() {
       if (problems.length)
         throw new Error(`Deployment ${url} failed checks: ${problems.join("; ")}`);
       console.log(`Created ${target} deployment: ${url}`);
+      if (target === "production") {
+        const pin = productionPin(
+          await api(`/v9/projects/${encodeURIComponent(projectId)}`),
+          deployed,
+          url,
+        );
+        if (pin) {
+          console.log(`::warning::${pin}`);
+          if (process.env.GITHUB_STEP_SUMMARY)
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, pin + "\n");
+        }
+      }
     }
     if (process.env.GITHUB_OUTPUT)
       fs.appendFileSync(

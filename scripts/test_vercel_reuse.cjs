@@ -1,6 +1,11 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { deploymentKey, findReusable, reusable } = require("./vercel-reuse.cjs");
+const {
+  deploymentKey,
+  findReusable,
+  reusable,
+  productionPin,
+} = require("./vercel-reuse.cjs");
 
 function inputs() {
   return {
@@ -146,5 +151,15 @@ test("an API error fails instead of claiming reuse or silently deploying", async
       throw new Error("HTTP 403");
     }, options),
     /403/,
+  );
+});
+
+test("a rollback pin is reported instead of claiming the new deployment is live", () => {
+  const url = "https://bobr-new.vercel.app";
+  assert.equal(productionPin({ targets: { production: { id: "dpl_new" } } }, { id: "dpl_new" }, url), null);
+  assert.equal(productionPin({ targets: {} }, { id: "dpl_new" }, url), null);
+  assert.match(
+    productionPin({ targets: { production: { id: "dpl_old" } } }, { id: "dpl_new" }, url),
+    /dpl_old.*vercel promote https:\/\/bobr-new\.vercel\.app/,
   );
 });
