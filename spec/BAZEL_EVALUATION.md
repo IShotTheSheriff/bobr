@@ -245,6 +245,7 @@ the current build.
 | `vercel promote bobr-1sm33vshp` | Production serves the tested build again                                                                                                   | local                                                                           |
 
 | First push after the promotion | Web created `bobr-302phqpmt` instead of reusing `bobr-1sm33vshp`, without a warning | [40468413605](https://github.com/IShotTheSheriff/bobr/actions/runs/40468413605) |
+| Next push | Web reused `bobr-302phqpmt` | [40468744082](https://github.com/IShotTheSheriff/bobr/actions/runs/40468744082) |
 
 The live check passed on each new deployment, and docs reused its production
 deployment throughout. A deployment created while production is rolled back is
