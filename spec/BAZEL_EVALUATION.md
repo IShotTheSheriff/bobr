@@ -224,7 +224,9 @@ The first, with no disk cache, built the Next apps and their tests and uploaded
 60 files. The second, a fresh runner with no disk cache and no browser
 libraries, restored both Next builds, both browser tests, both type checks and
 both unit tests: 34 hits, 0 misses and 0 of 6 tests run. The workflow
-`vercel-cache.yml` repeats this when the cache code changes and every week. A login older than the CLI's token lifetime returned HTTP 403, so the
+`vercel-cache.yml` repeats this when the cache code changes and every week.
+
+A login older than the CLI's token lifetime returned HTTP 403, so the
 wrapper now runs `vercel whoami`, which renews the login before reading it. If
 the cache is unreachable, the wrapper builds locally instead of failing. The
 self-hosted server in `infra/bazel-cache` remains an alternative and passed its
@@ -243,9 +245,8 @@ the current build.
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
 | Docs edit while rolled back     | Web created `bobr-1sm33vshp` instead of reusing, warned that production still serves the rolled-back deployment and named `vercel promote` | [40468109569](https://github.com/IShotTheSheriff/bobr/actions/runs/40468109569) |
 | `vercel promote bobr-1sm33vshp` | Production serves the tested build again                                                                                                   | local                                                                           |
-
-| First push after the promotion | Web created `bobr-302phqpmt` instead of reusing `bobr-1sm33vshp`, without a warning | [40468413605](https://github.com/IShotTheSheriff/bobr/actions/runs/40468413605) |
-| Next push | Web reused `bobr-302phqpmt` | [40468744082](https://github.com/IShotTheSheriff/bobr/actions/runs/40468744082) |
+| First push after the promotion  | Web created `bobr-302phqpmt` instead of reusing `bobr-1sm33vshp`, without a warning                                                        | [40468413605](https://github.com/IShotTheSheriff/bobr/actions/runs/40468413605) |
+| Next push                       | Web reused `bobr-302phqpmt`                                                                                                                | [40468744082](https://github.com/IShotTheSheriff/bobr/actions/runs/40468744082) |
 
 The live check passed on each new deployment, and docs reused its production
 deployment throughout. A deployment created while production is rolled back is
