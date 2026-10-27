@@ -32,8 +32,11 @@ CI installs with the pinned Playwright CLI. Locally, run
 Bazel downloads the pinned browser. After updating Playwright, run
 `node scripts/update-chromium.cjs` to generate its version and archive hashes.
 
-`pnpm build`, `pnpm test` and CI use `scripts/bazel.py`. It reads shared-cache
-configuration from the environment and otherwise uses the local disk cache.
+`pnpm build`, `pnpm test` and CI use `scripts/bazel.py`. If you are logged into
+the Vercel CLI, it shares Next builds and test results with your teammates
+through the team's Vercel Remote Cache. Run `vercel login` once; set
+`BAZEL_REMOTE_CACHE=off` to build without it. See
+[the setup guide](spec/BAZEL_DEPLOYMENT.md#configure-the-shared-cache).
 `pnpm dev` does not populate production build cache entries. Run `pnpm build` or
 `pnpm test` to do that.
 
@@ -65,7 +68,7 @@ App imports + complete UI sources
              |                           |
   NextBuild, vercel build --standalone   app type check
              |
-     .next + vercel_output.tar
+        vercel_output.tar
                     |
            Playwright artifact tests
                     |

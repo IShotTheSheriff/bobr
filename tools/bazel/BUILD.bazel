@@ -64,3 +64,9 @@ js_test(
     entry_point = "check-deployment.test.cjs",
     data = ["check-deployment.cjs", ":artifact_helpers", "//:node_modules/tar"],
 )
+
+js_test(
+    name = "vercel_cache_test",
+    entry_point = "vercel-cache.test.cjs",
+    data = ["vercel-cache.cjs"],
+)
