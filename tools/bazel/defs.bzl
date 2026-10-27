@@ -100,7 +100,8 @@ def next_app():
             "//conditions:default": _next_env("preview"),
         }),
         mnemonic = "NextBuild",
-        out_dirs = [".next"],
+        # The archive is the only output. Leaving `.next` undeclared keeps the
+        # shared cache to one file per Next build.
         outs = ["vercel_output.tar"],
         tool = "//tools/bazel:build_next",
         visibility = ["//visibility:public"],

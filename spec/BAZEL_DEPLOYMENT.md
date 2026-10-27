@@ -86,11 +86,42 @@ key. Runtime secrets belong in Vercel, not cached build artifacts.
 
 ## Configure the shared cache
 
-Bóbr's selected cache is self-hosted `bazel-remote` on AWS EC2, behind Caddy for
-HTTPS and separate reader/writer access. Follow the
-[server setup](../infra/bazel-cache/README.md) to provision it and run acceptance.
-AWS account, domain and hosted validation are still pending. The wrapper also
-accepts other Bazel-compatible HTTPS or gRPC TLS caches:
+Bóbr shares Bazel results through the team's Vercel Remote Cache, the store
+Turborepo uses. Bazel cannot talk to it directly, so `scripts/bazel.py` starts
+`tools/bazel/vercel-cache.cjs`, a localhost proxy that translates Bazel's HTTP
+cache protocol into Vercel's `/v8/artifacts` API. Developers run `vercel login`
+once; the wrapper finds that login, or `VERCEL_TOKEN`, and uses the cache. Set
+`BAZEL_REMOTE_CACHE=off` to build without it.
+
+The team is on Vercel's Hobby plan, which allows 100 cache requests a minute and
+10 GB of downloads a month. The wrapper therefore caches only Next builds and
+test results remotely; every other step reruns locally in seconds. A Next build
+stores one archive, so a fully cached build needs about 60 requests. Vercel
+expires artifacts after 7 days.
+
+Vercel tokens cannot be limited to reading, so CI and developers write separate
+namespaces. CI signs the action results it writes with `BAZEL_CACHE_SIGNING_KEY`
+and ignores unsigned ones. Bazel verifies every downloaded file against its
+digest. A developer's upload therefore never reaches a CI build. Developers read
+CI's results first, then their teammates'. Linux machines reuse CI's builds;
+macOS machines share with each other, because Bazel keys include the platform's
+Node binary.
+
+Set these on `IShotTheSheriff/bobr` for the build job. The token must be a
+repository secret, because the build job uses no environment:
+
+```sh
+gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr     # the same team token
+openssl rand -base64 32 | gh secret set BAZEL_CACHE_SIGNING_KEY --repo IShotTheSheriff/bobr
+gh variable set BAZEL_REMOTE_CACHE --repo IShotTheSheriff/bobr --body vercel
+```
+
+Trusted pushes upload; pull requests only read. Fork PRs receive no secrets and
+use the Actions cache alone.
+
+The wrapper also accepts any Bazel-compatible HTTPS or gRPC TLS cache, such as
+the [self-hosted server](../infra/bazel-cache/README.md) with separate reader
+and writer credentials:
 
 | Setting                     | Kind in GitHub    | Purpose                                                                                  |
 | --------------------------- | ----------------- | ---------------------------------------------------------------------------------------- |
@@ -99,17 +130,9 @@ accepts other Bazel-compatible HTTPS or gRPC TLS caches:
 | `BAZEL_REMOTE_WRITE_HEADER` | Secret            | Complete header for trusted push writers                                                 |
 | `BAZEL_REMOTE_PUBLIC_READ`  | Optional variable | `1` only for a deliberately public read endpoint                                         |
 
-CI gives writer credentials to pushes. PRs receive the read credential when
-GitHub makes it available; fork PRs receive no secrets. Without credentials or
-explicit public-read configuration, CI uses its Actions-backed disk cache.
-Read-only access must be enforced by the backend. A command-line flag alone
-cannot restrict a credential held by code under test.
-
-Locally, set `BAZEL_REMOTE_CACHE` and `BAZEL_REMOTE_HEADER` in your shell's secret
-manager integration. Reads are the default. Set `BAZEL_REMOTE_UPLOAD=1` only with
-a writer credential. The wrapper puts credentials in a temporary mode-0600 rc
-file and removes it when Bazel exits. It does not print the token or put it in
-command arguments. Direct `bazel` calls bypass this wrapper.
+The wrapper puts credentials in a temporary mode-0600 rc file or the proxy's
+environment and removes them when Bazel exits. It does not print tokens or put
+them in command arguments. Direct `bazel` calls bypass this wrapper.
 
 Compatible toolchains and inputs can share actions. macOS arm64 and Linux x64
 builds have different execution platforms, so do not expect their complete Next

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,14 @@ def digest_tree(directory):
             digest.update(str(file.relative_to(directory)).encode() + b"\0")
             digest.update(file.read_bytes())
     return digest.hexdigest()
+
+
+def archive_scripts(archive):
+    """Yields the client chunks that the deployment archive ships."""
+    with tarfile.open(archive) as tar:
+        for member in tar:
+            if member.isfile() and "/_next/static/chunks/" in member.name and member.name.endswith(".js"):
+                yield tar.extractfile(member).read().decode()
 
 
 def actions(file):
@@ -97,7 +106,7 @@ def main():
         for action in next_actions:
             raw = [i["path"] for i in action["inputs"] if "packages/ui/" in i["path"] or "@repo+ui@" in i["path"]]
             assert not raw, f"Raw UI sources leaked into Next inputs: {raw}"
-        current = {app: {kind: digest_tree(base / 'links/bin/apps' / app / directory) for kind, directory in [("projection", "ui_runtime"), ("next", ".next")]} for app in APPS}
+        current = {app: {"projection": digest_tree(base / "links/bin/apps" / app / "ui_runtime")} for app in APPS}
         for app in APPS:
             archive = base / "links/bin/apps" / app / "vercel_output.tar"
             current[app]["vercel"] = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -105,8 +114,7 @@ def main():
             changed = {app for app in APPS if current[app]["projection"] != previous[app]["projection"]}
             assert changed == projection_changed, f"{case}: changed projections {changed}, expected {projection_changed}"
             for app in APPS - expected:
-                for kind in ("next", "vercel"):
-                    assert current[app][kind] == previous[app][kind], f"{case}: cached {kind} output changed for {app}"
+                assert current[app]["vercel"] == previous[app]["vercel"], f"{case}: cached archive changed for {app}"
         previous = current
         results.append({"case": case, "projection_executed": sorted(projected), "next_executed": sorted(executed), "next_cache_hits": sorted(hits), "browser_executed": sorted(browser_executed), "browser_cache_hits": sorted(browser_hits), "digests": current})
         (base / "results.json").write_text(json.dumps(results, indent=2) + "\n")
@@ -153,8 +161,8 @@ def main():
     for app in APPS:
         projection = base / "links/bin/apps" / app / "ui_runtime/utils/index.js"
         assert "effect-two" in projection.read_text()
-        chunks = base / "links/bin/apps" / app / ".next/static/chunks"
-        assert any("effect-two" in f.read_text() for f in chunks.rglob("*.js")), f"{app}: Next dropped the side effect"
+        archive = base / "links/bin/apps" / app / "vercel_output.tar"
+        assert any("effect-two" in text for text in archive_scripts(archive)), f"{app}: Next dropped the side effect"
     # A new output base cannot reuse the producer's local outputs/action cache.
     if remote:
         command[-1] = f"--output_base={base / 'consumer'}"
@@ -186,8 +194,8 @@ def main():
     unused.write_text(unused.read_text().replace("effect-two", "relative-effect-three"))
     run("changed-relative-side-effect", APPS, APPS)
     for app in APPS:
-        chunks = base / "links/bin/apps" / app / ".next/static/chunks"
-        assert any("relative-effect-three" in f.read_text() for f in chunks.rglob("*.js")), f"{app}: Next dropped the relative import's side effect"
+        archive = base / "links/bin/apps" / app / "vercel_output.tar"
+        assert any("relative-effect-three" in text for text in archive_scripts(archive)), f"{app}: Next dropped the relative import's side effect"
     print(f"All cases passed. Full action logs and digests: {base / 'results.json'}", flush=True)
 
 

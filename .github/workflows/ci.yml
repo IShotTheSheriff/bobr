@@ -23,6 +23,10 @@ jobs:
       # read-only credential; fork PRs receive no secrets from GitHub.
       BAZEL_REMOTE_HEADER: ${{ github.event_name == 'push' && secrets.BAZEL_REMOTE_WRITE_HEADER || secrets.BAZEL_REMOTE_READ_HEADER }}
       BAZEL_REMOTE_UPLOAD: ${{ github.event_name == 'push' && '1' || '0' }}
+      # Vercel's Remote Cache. CI signs the action results it writes and ignores
+      # unsigned ones, so developer uploads never reach a CI build.
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      BAZEL_CACHE_SIGNING_KEY: ${{ secrets.BAZEL_CACHE_SIGNING_KEY }}
       DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
       - uses: actions/checkout@v4
@@ -47,8 +51,18 @@ jobs:
         env:
           PUBLIC_CACHE: ${{ vars.BAZEL_REMOTE_PUBLIC_READ }}
         run: |
-          if [ -z "$BAZEL_REMOTE_HEADER" ] && [ "$PUBLIC_CACHE" != "1" ]; then
-            echo 'BAZEL_REMOTE_CACHE=' >> "$GITHUB_ENV"
+          ready=""
+          if [ "$BAZEL_REMOTE_CACHE" = vercel ]; then
+            if [ -n "$VERCEL_TOKEN" ] && [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then ready=1; fi
+          elif [ -n "$BAZEL_REMOTE_CACHE" ]; then
+            if [ -n "$BAZEL_REMOTE_HEADER" ] || [ "$PUBLIC_CACHE" = 1 ]; then ready=1; fi
+          fi
+          # An explicit "off" also stops the wrapper from detecting a Vercel login.
+          if [ -z "$ready" ]; then
+            echo 'BAZEL_REMOTE_CACHE=off' >> "$GITHUB_ENV"
+            echo "Shared Bazel cache: off. CI uses its GitHub Actions cache." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Shared Bazel cache: $BAZEL_REMOTE_CACHE." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Restore Bazel disk and downloads
         id: cache

@@ -173,6 +173,8 @@ the `bobr-web` and `bobr-docs` projects on 2026-10-26. Settings live on the
 | Merge into `main`         | created production                    | created production                    | [40371556470](https://github.com/IShotTheSheriff/bobr/actions/runs/40371556470) |
 | Docs edit on `main`       | created production, live check passed | created production, live check passed | [40373598068](https://github.com/IShotTheSheriff/bobr/actions/runs/40373598068) |
 | Reuse key ignores `crons` | created production, live check passed | created production, live check passed | [40374236995](https://github.com/IShotTheSheriff/bobr/actions/runs/40374236995) |
+| Docs edit after the fix   | reused production, live check passed  | reused production, live check passed  | [40374730840](https://github.com/IShotTheSheriff/bobr/actions/runs/40374730840) |
+| Final code on `bazel`     | created preview, live check passed    | created preview, live check passed    | [40375231811](https://github.com/IShotTheSheriff/bobr/actions/runs/40375231811) |
 
 Vercel accepted each archive as prebuilt output, and the deployments were ready
 in about 10 seconds. Between deploys, only `latestDeployments` and `targets`
@@ -189,15 +191,45 @@ assets from both apps, and every status, title and API body matched the tested
 archive. The docs edit on `main` should have reused both production deployments
 but created new ones. The project's `crons` record stores the current
 production deployment's ID, so the reuse key changed with every production
-deploy. The key now ignores it.
+deploy. The key now ignores it, and the next docs edit reused both production
+deployments.
 
 Still open:
 
-- The merge into `main` deployed production for both apps and replaced the
-  preview build that Vercel had promoted for `bobr-web`. Production reuse must
-  refer to the current deployment after a rollback, which the unit tests cover
-  but no hosted run has exercised.
-- The self-hosted cache passed its acceptance test on GitHub Actions
-  ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799))
-  with separate producer, read-only consumer and next-commit clients. The AWS
-  host itself is not provisioned, so CI uses the GitHub Actions cache.
+- After a rollback, production reuse must compare with the deployment Vercel
+  now serves. The unit tests cover this, but no hosted run has exercised it.
+  See the check below.
+- CI uses Vercel's Remote Cache once the repository has the `VERCEL_TOKEN` and
+  `BAZEL_CACHE_SIGNING_KEY` secrets and `BAZEL_REMOTE_CACHE=vercel`. Until then
+  it reports the shared cache as off and uses the GitHub Actions cache.
+
+## Shared cache through Vercel
+
+Developers share Bazel results through the team's Vercel Remote Cache. On
+2026-10-27, two Bazel clients on one Mac, each with its own output base and no
+disk cache, built the Next apps and their tests:
+
+| Client       | Next builds and tests          | Vercel cache                  |
+| ------------ | ------------------------------ | ----------------------------- |
+| `team-mac-1` | ran                            | 0 hits, 10 misses, 44 uploads |
+| `team-mac-2` | all restored, 0 of 4 tests run | 26 hits, 0 misses, 0 uploads  |
+
+The second client needed about 50 requests, inside the Hobby plan's 100 a
+minute. A login older than the CLI's token lifetime returned HTTP 403, so the
+wrapper now runs `vercel whoami`, which renews the login before reading it. If
+the cache is unreachable, the wrapper builds locally instead of failing. The
+self-hosted server in `infra/bazel-cache` remains an alternative and passed its
+acceptance test on GitHub Actions
+([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799)).
+
+## Before calling the project complete
+
+Test production reuse after a rollback on Vercel:
+
+1. Roll `bobr-web` back to an earlier production deployment, for example with
+   `vercel rollback <deployment-url> --scope 0xventures`.
+2. Push a commit to `main` that leaves the web archive unchanged, such as a
+   documentation edit.
+3. The web deploy job must report "Created production deployment", not reuse:
+   the deployment Vercel now serves was not built from the tested archive.
+   The live check must pass, and production must serve the tested build again.
