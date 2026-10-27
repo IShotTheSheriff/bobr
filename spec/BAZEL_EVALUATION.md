@@ -226,6 +226,13 @@ libraries, restored both Next builds, both browser tests, both type checks and
 both unit tests: 34 hits, 0 misses and 0 of 6 tests run. The workflow
 `vercel-cache.yml` repeats this when the cache code changes and every week.
 
+Two Macs also shared results. A developer Mac uploaded the Next builds and test
+results through the wrapper at commit `a7e8b67`. A fresh `macos-latest` runner,
+a different Mac with no Bazel state and no disk cache, then restored all 8:
+34 hits, 0 misses and 0 of 6 tests run
+([40469246302](https://github.com/IShotTheSheriff/bobr/actions/runs/40469246302)).
+`vercel-cache-mac.yml` repeats that restore on demand.
+
 A login older than the CLI's token lifetime returned HTTP 403, so the
 wrapper now runs `vercel whoami`, which renews the login before reading it. If
 the cache is unreachable, the wrapper builds locally instead of failing. The
