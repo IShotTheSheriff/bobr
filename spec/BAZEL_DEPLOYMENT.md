@@ -161,6 +161,12 @@ current production deployment, so a rollback cannot accidentally reuse an older
 record. Missing environment version metadata disables reuse. Set
 `VERCEL_FORCE_DEPLOY=1` as an Actions variable to force a new deployment.
 
+After an [Instant Rollback](https://vercel.com/docs/deployments/instant-rollback),
+Vercel keeps production on the rolled-back deployment until someone promotes a
+newer one. CI then still deploys each tested archive to production, warns that
+production serves another deployment, and prints the `vercel promote` command.
+It never promotes on its own, so a rollback during an incident stays in place.
+
 Deployment jobs serialize per app and ref and skip superseded commits before
 uploading. Project metadata can conservatively cause a new deployment even when
 the artifact matches. These checks have unit coverage; consecutive hosted
