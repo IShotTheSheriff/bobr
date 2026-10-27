@@ -196,9 +196,6 @@ deployments.
 
 Still open:
 
-- After a rollback, production reuse must compare with the deployment Vercel
-  now serves. The unit tests cover this, but no hosted run has exercised it.
-  See the check below.
 - CI uses Vercel's Remote Cache once the repository has the `VERCEL_TOKEN` and
   `BAZEL_CACHE_SIGNING_KEY` secrets and `BAZEL_REMOTE_CACHE=vercel`. Until then
   it reports the shared cache as off and uses the GitHub Actions cache.
@@ -234,20 +231,18 @@ self-hosted server in `infra/bazel-cache` remains an alternative and passed its
 acceptance test on GitHub Actions
 ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799)).
 
-## Before calling the project complete
+## Rollback on Vercel
 
-Test production reuse after a rollback on Vercel. After an
-[Instant Rollback](https://vercel.com/docs/deployments/instant-rollback), Vercel
-stops moving production domains to new production deployments until someone
-promotes one, and CI must not undo that decision.
+After an [Instant Rollback](https://vercel.com/docs/deployments/instant-rollback),
+Vercel keeps production on the rolled-back deployment until someone promotes a
+newer one. CI must not undo that decision. On 2026-10-27 `bobr-web` was rolled
+back from `bobr-cbgrlomjb` to the older `bobr-ks86i2lf8`, whose archive predates
+the current build.
 
-1. Roll `bobr-web` back to an earlier production deployment, for example with
-   `vercel rollback <deployment-url> --scope 0xventures`.
-2. Push a commit to `main` that leaves the web archive unchanged, such as a
-   documentation edit.
-3. The web deploy job must create a production deployment instead of reusing
-   one, because the deployment Vercel serves was not built from the tested
-   archive. It must warn that production still serves the rolled-back
-   deployment and name the `vercel promote` command. The live check must pass.
-4. Promote that deployment, push another documentation edit, and confirm the
-   job reuses it without a warning.
+| Step                            | Result                                                                                                                                     | Run                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Docs edit while rolled back     | Web created `bobr-1sm33vshp` instead of reusing, warned that production still serves the rolled-back deployment and named `vercel promote` | [40468109569](https://github.com/IShotTheSheriff/bobr/actions/runs/40468109569) |
+| `vercel promote bobr-1sm33vshp` | Production serves the tested build again                                                                                                   | local                                                                           |
+
+The live check passed on the new deployment, and docs reused its production
+deployment throughout.
