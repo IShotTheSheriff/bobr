@@ -71,9 +71,15 @@ Linux runners:
 | Body of `sub` only                              | Docs build, docs browser and unit tests, UI package checks | [39996498057](https://github.com/IShotTheSheriff/bobr/actions/runs/39996498057) |
 | Revert of that change                           | Nothing; 15 targets reused, no cache upload                | [39997122124](https://github.com/IShotTheSheriff/bobr/actions/runs/39997122124) |
 | Full invalidation proof with HTTP cache clients | 14 of 14 cases passed                                      | [39994990364](https://github.com/IShotTheSheriff/bobr/actions/runs/39994990364) |
+| Nx script removal, new BUILD-file check         | Only `//:build_files_test`; 14 targets reused              | [40480853937](https://github.com/IShotTheSheriff/bobr/actions/runs/40480853937) |
 
 In the `sub` run, web's Next build, browser test, type check, lint and unit test
 all came from the cache, as did docs' type check and lint.
+
+The BUILD-file check run on 2026-10-27 also reused both production deployments,
+and each passed the 9-request live check. Locally, the check failed for
+`apps/admin`, `packages/admin-e2e` and `packages/charts` without BUILD files
+and named the file to copy for each.
 
 ## Why the artifact test matters
 
