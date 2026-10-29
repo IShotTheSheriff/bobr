@@ -152,8 +152,11 @@ if (require.main === module) {
     });
     server.listen(0, "127.0.0.1", () => console.log(server.address().port));
     const stop = () => {
+      // In GitHub Actions a notice shows the counts on the run page, outside the logs.
+      const notice = process.env.GITHUB_ACTIONS === "true" ? "::notice title=Vercel cache::" : "";
       console.error(
-        `Vercel cache: ${stats.hits} hits, ${stats.misses} misses, ${stats.uploads} uploads` +
+        notice +
+          `Vercel cache: ${stats.hits} hits, ${stats.misses} misses, ${stats.uploads} uploads` +
           (stats.unsigned ? `, ${stats.unsigned} unsigned results ignored` : "") +
           (stats.errors ? `, ${stats.errors} errors` : ""),
       );
