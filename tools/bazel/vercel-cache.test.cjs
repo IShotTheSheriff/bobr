@@ -1,5 +1,9 @@
 const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
 const { test } = require("node:test");
 const { createCacheProxy, artifactId, sign } = require("./vercel-cache.cjs");
 
@@ -117,4 +121,41 @@ test("only Bazel cache paths are served", async (t) => {
   const { api } = await fakeVercel(t);
   const reader = await proxy(t, api, {});
   assert.equal((await reader.get("/ac/not-a-digest")).status, 400);
+});
+
+// Starts the proxy in GitHub Actions the way scripts/bazel.py does, with Vercel's
+// status check answered by a stub.
+function runInActions(t, status) {
+  const dir = fs.mkdtempSync(path.join(process.env.TEST_TMPDIR || os.tmpdir(), "vercel-cache-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, "status.cjs");
+  fs.writeFileSync(stub, `globalThis.fetch = async () => new Response(${JSON.stringify(JSON.stringify({ status }))});`);
+  const child = spawn(process.execPath, ["-r", stub, require.resolve("./vercel-cache.cjs")], {
+    env: { ...process.env, GITHUB_ACTIONS: "true", VERCEL_TOKEN: "token", BOBR_VERCEL_TEAM: "team" },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  const listening = new Promise((resolve) =>
+    child.stdout.on("data", (chunk) => (stdout += chunk).includes("\n") && resolve()),
+  );
+  const exit = new Promise((resolve) => child.on("exit", (code) => resolve({ code, stderr })));
+  return { child, listening, exit };
+}
+
+test("in GitHub Actions an unavailable cache is a run warning", async (t) => {
+  const { code, stderr } = await runInActions(t, "disabled").exit;
+  assert.equal(code, 1);
+  assert.equal(stderr, "::warning title=Vercel cache::Vercel's Remote Cache is unavailable: disabled\n");
+});
+
+test("in GitHub Actions the counts notice starts its own line", async (t) => {
+  // Bazel's output ends in a color reset without a newline, and the runner reads
+  // a command only at the start of a line.
+  const run = runInActions(t, "enabled");
+  await run.listening;
+  run.child.kill("SIGTERM");
+  const { code, stderr } = await run.exit;
+  assert.equal(code, 0);
+  assert.equal(stderr, "\n::notice title=Vercel cache::Vercel cache: 0 hits, 0 misses, 0 uploads\n");
 });
