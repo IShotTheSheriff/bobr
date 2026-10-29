@@ -130,8 +130,11 @@ module.exports = { createCacheProxy, artifactId, sign };
 
 if (require.main === module) {
   const { VERCEL_TOKEN: token, BOBR_VERCEL_TEAM: teamId } = process.env;
+  // In GitHub Actions, notices and warnings show on the run page, outside the logs.
+  const actions = process.env.GITHUB_ACTIONS === "true";
   const unavailable = (reason) => {
-    console.error(`Vercel's Remote Cache is unavailable: ${reason}`);
+    // A rejected or expired token should be visible without reading the logs.
+    console.error(`${actions ? "::warning title=Vercel cache::" : ""}Vercel's Remote Cache is unavailable: ${reason}`);
     process.exit(1);
   };
   (async () => {
@@ -152,9 +155,8 @@ if (require.main === module) {
     });
     server.listen(0, "127.0.0.1", () => console.log(server.address().port));
     const stop = () => {
-      // In GitHub Actions a notice shows the counts on the run page, outside the logs.
       // Bazel's output ends in a color reset without a newline, so start a new line.
-      const notice = process.env.GITHUB_ACTIONS === "true" ? "\n::notice title=Vercel cache::" : "";
+      const notice = actions ? "\n::notice title=Vercel cache::" : "";
       console.error(
         notice +
           `Vercel cache: ${stats.hits} hits, ${stats.misses} misses, ${stats.uploads} uploads` +
