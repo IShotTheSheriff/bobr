@@ -49,7 +49,8 @@ jobs:
         run: python3 scripts/bazel.py test $TARGETS --disk_cache= 2>&1 | tee "$RUNNER_TEMP/build.log"
       - name: Report Vercel cache use
         if: always()
-        run: grep -oE "(Vercel cache: |Vercel's Remote Cache).*" "$RUNNER_TEMP/build.log" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          grep -oE "(Vercel cache: |Vercel's Remote Cache).*" "$RUNNER_TEMP/build.log" | tee -a "$GITHUB_STEP_SUMMARY"
 
   restore:
     name: Restore on a fresh runner
