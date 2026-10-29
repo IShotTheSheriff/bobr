@@ -2,7 +2,8 @@ name: Vercel cache on another Mac
 
 # A developer's Mac shares results through `pnpm test`. This fresh macOS runner,
 # a different machine with no Bazel state, must restore the same Next builds and
-# test results from Vercel instead of building them.
+# test results from Vercel instead of building them. So it fails until a Mac has
+# run `pnpm test` on the same code.
 on:
   push:
     branches: ["main", "bazel"]
@@ -52,6 +53,10 @@ jobs:
           spec.loader.exec_module(summary)
           ran, cached = summary.summarize(summary.spawns(sys.argv[1]))
           if ran or not cached:
+              print("::error title=No developer results to restore::This job restores what a "
+                    "developer's Mac uploaded to Vercel. Run pnpm test on a Mac that is logged "
+                    "in to Vercel, then re-run this job. If a Mac already ran it on this code, "
+                    "the two Macs computed different cache keys.")
               sys.exit(f"Built on this Mac instead of restoring: {sorted(ran)}")
           print(f"Restored {len(cached)} Next builds and test results from Vercel.")
           EOF
