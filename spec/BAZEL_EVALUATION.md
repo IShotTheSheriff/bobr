@@ -74,6 +74,8 @@ Linux runners:
 | Nx script removal, new BUILD-file check         | Only `//:build_files_test`; 14 targets reused              | [40480853937](https://github.com/IShotTheSheriff/bobr/actions/runs/40480853937) |
 | Workflow YAML fix                               | Nothing; 18 targets reused                                 | [40890601484](https://github.com/IShotTheSheriff/bobr/actions/runs/40890601484) |
 | Cache proxy notice fix                          | Only `//tools/bazel:vercel_cache_test`; 17 targets reused  | [40891010787](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010787) |
+| Docs test edit with Vercel cache on             | Docs unit test, type check and lint; 25 Vercel uploads     | [40899648722](https://github.com/IShotTheSheriff/bobr/actions/runs/40899648722) |
+| Workflow edit with Vercel cache on              | Nothing; 18 targets reused, no Vercel requests             | [40900397539](https://github.com/IShotTheSheriff/bobr/actions/runs/40900397539) |
 
 In the `sub` run, web's Next build, browser test, type check, lint and unit test
 all came from the cache, as did docs' type check and lint.
@@ -210,11 +212,15 @@ production deployment's ID, so the reuse key changed with every production
 deploy. The key now ignores it, and the next docs edit reused both production
 deployments.
 
-Still open:
-
-- CI uses Vercel's Remote Cache once the repository has the `VERCEL_TOKEN` and
-  `BAZEL_CACHE_SIGNING_KEY` secrets. Until then
-  it reports the shared cache as off and uses the GitHub Actions cache.
+CI's build job has used Vercel's Remote Cache since 2026-10-29. It reads the
+deploy environment's `VERCEL_TOKEN` with `deployment: false`, and the
+repository secret `BAZEL_CACHE_SIGNING_KEY` turns the cache on. The first run
+with something to build was a docs test edit. It ran only the docs unit test,
+type check and lint. The proxy looked their 6 steps up in Vercel, found none
+and uploaded 25 signed files
+([40899648722](https://github.com/IShotTheSheriff/bobr/actions/runs/40899648722)).
+CI's disk cache answers first, so a commit that builds nothing sends Vercel no
+requests.
 
 ## Shared cache through Vercel
 
@@ -244,6 +250,12 @@ both unit tests: 34 hits, 0 misses and 0 of 6 tests run. The workflow
 2026-10-29 both runners found every result in Vercel, with 34 hits, 0 misses
 and 0 uploads each, and the fresh runner ran 0 of its 8 Next builds and checks
 ([40891010840](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010840)).
+After the docs test edit, only CI's namespace held that code's docs unit test
+and type check, because only CI had built them. The next run's first runner,
+on the developer path with no disk cache, still built nothing, with 34 hits
+and 0 misses
+([40900397649](https://github.com/IShotTheSheriff/bobr/actions/runs/40900397649)).
+A developer's Linux machine therefore reuses CI's uploads.
 
 Two Macs also shared results. A developer Mac uploaded the Next builds and test
 results through the wrapper at commit `a7e8b67`. A fresh `macos-latest` runner,
