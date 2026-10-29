@@ -69,6 +69,59 @@ function checkExports(source) {
   }
 }
 
+// The names a module exports at runtime. Types and declarations are left out.
+function runtimeExports(tree) {
+  const names = [];
+  for (const node of tree.statements) {
+    if (ts.isExportAssignment(node)) {
+      names.push("default");
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.isTypeOnly) continue;
+      if (!node.exportClause) names.push(`* from "${node.moduleSpecifier.text}"`);
+      else if (ts.isNamespaceExport(node.exportClause))
+        names.push(node.exportClause.name.text);
+      else
+        for (const item of node.exportClause.elements)
+          if (!item.isTypeOnly) names.push(item.name.text);
+    } else {
+      const modifiers = (ts.canHaveModifiers(node) && ts.getModifiers(node)) || [];
+      const has = (kind) => modifiers.some((modifier) => modifier.kind === kind);
+      if (
+        !has(ts.SyntaxKind.ExportKeyword) ||
+        has(ts.SyntaxKind.DeclareKeyword) ||
+        ts.isInterfaceDeclaration(node) ||
+        ts.isTypeAliasDeclaration(node)
+      )
+        continue;
+      if (ts.isVariableStatement(node))
+        for (const declaration of node.declarationList.declarations)
+          names.push(declaration.name.getText(tree));
+      else
+        names.push(has(ts.SyntaxKind.DefaultKeyword) ? "default" : node.name.getText(tree));
+    }
+  }
+  return names;
+}
+
+// React modules stay whole for Next, so a UI file is the smallest part of the
+// package an app can depend on. With one runtime export per file, an app's
+// inputs hold only the components it uses.
+function checkOneExport(tree, name) {
+  const names = runtimeExports(tree);
+  if (names.length < 2) return;
+  const example = names
+    .slice(1)
+    .find((name) => /^[A-Za-z_$][\w$]*$/.test(name) && name !== "default");
+  const file = example
+    ? `, such as src/${example.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}.tsx`
+    : "";
+  throw new Error(
+    `@repo/ui ${name} exports ${names.join(", ")}. An app rebuilds for every ` +
+      `export of a UI file it imports, so give each export its own file${file}. ` +
+      "Shared helpers can go in src/utils, where apps get only the exports they name.",
+  );
+}
+
 // Follows imports from Next's entry files into the UI package. With `types`,
 // type-only imports count too: the type check needs them, the runtime does not.
 function trace(app, source, { types = false, output } = {}) {
@@ -186,6 +239,7 @@ function trace(app, source, { types = false, output } = {}) {
       );
     if (!/\.[cm]?[jt]sx?$/.test(file)) continue;
     const tree = parse(file);
+    if (reachable.has(file)) checkOneExport(tree, path.relative(source, file));
     function visit(node) {
       if (
         ts.isMetaProperty(node) ||

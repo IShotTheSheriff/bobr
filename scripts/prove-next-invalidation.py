@@ -181,15 +181,18 @@ def main():
         (base / "remote-cache-evidence.json").write_text(json.dumps({"successful_reads": remote.reads, "producer_writes": writes, "consumer_writes": remote.writes - writes}, indent=2) + "\n")
     # Consume utilities only through a component's bare relative import.
     # This used to emit an empty utility projection and silently lose effects.
-    component = checkout / "packages/ui/src/proof-utils.tsx"
-    component.write_text('import /* comment */ "./utils";\nexport const add = (a: number, b: number = 0) => a + b + 13;\nexport const sub = (a: number, b: number = 0) => a - b - 6;\n')
+    # A UI file may export one runtime value, so each utility gets its own file.
+    for name, body in (("add", "a + b + 13"), ("sub", "a - b - 6")):
+        (checkout / f"packages/ui/src/proof-{name}.tsx").write_text(f'import /* comment */ "./utils";\nexport const {name} = (a: number, b: number = 0) => {body};\n')
     for app in APPS:
         for file in (checkout / "apps" / app).rglob("*.ts*"):
             if "node_modules" in file.parts:
                 continue
             text = file.read_text()
-            if "@repo/ui/utils" in text:
-                file.write_text(text.replace("@repo/ui/utils", "@repo/ui/proof-utils"))
+            for name in ("add", "sub"):
+                text = text.replace(f'import {{ {name} }} from "@repo/ui/utils"', f'import {{ {name} }} from "@repo/ui/proof-{name}"')
+            assert 'from "@repo/ui/utils"' not in text, f"{file}: update the proof's import rewrite"
+            file.write_text(text)
     run("relative-side-effect-import", APPS, APPS)
     unused.write_text(unused.read_text().replace("effect-two", "relative-effect-three"))
     run("changed-relative-side-effect", APPS, APPS)

@@ -316,6 +316,32 @@ test("app imports outside the app package fail explicitly", async (t) => {
   await assert.rejects(f.run(), /outside declared app\/UI sources/);
 });
 
+test("a UI file with two runtime exports fails and names a file to split into", async (t) => {
+  const f = fixture(t, 'import { Card } from "@repo/ui/card"; export const page = Card;', "");
+  fs.writeFileSync(
+    path.join(f.source, "src/card.tsx"),
+    "export const Card = () => null;\nexport function CardHeader() { return null; }",
+  );
+  await assert.rejects(
+    f.run(),
+    /^Error: @repo\/ui src\/card\.tsx exports Card, CardHeader\..*src\/card-header\.tsx/,
+  );
+});
+
+test("types and UI files no app imports do not count against one export per file", async (t) => {
+  const f = fixture(t, 'import { Card } from "@repo/ui/card"; export const page = Card;', "");
+  fs.writeFileSync(
+    path.join(f.source, "src/card.tsx"),
+    "export type CardProps = { title: string };\n" +
+      "export interface CardSlots { header?: string }\n" +
+      "export const Card = (props: CardProps) => props.title;",
+  );
+  fs.writeFileSync(path.join(f.source, "src/unused.tsx"), "export const One = 1;\nexport const Two = 2;");
+  await f.run();
+  assert.ok(fs.existsSync(path.join(f.output, "card.tsx")));
+  assert.ok(!fs.existsSync(path.join(f.output, "unused.tsx")));
+});
+
 const { projectUiTypes } = projectUi;
 
 function typesFixture(t, appSource, sources) {

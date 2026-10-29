@@ -12,7 +12,7 @@ work, and Vercel should deploy the tested artifact.
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Skip Next for unused utility exports | The mutation experiment checks actual Next actions and unchanged projection bytes for barrel and same-module exports.                                                                                                 |
 | Invalidate used exports and effects  | The experiment covers `add`, `sub`, unused barrel branches with effects and relative side-effect imports.                                                                                                             |
-| Ignore unreachable UI components     | Traversal starts at app imports. Unreachable files and their utility imports do not enter Next inputs. Reachable React modules remain whole files.                                                                    |
+| Ignore unreachable UI components     | Traversal starts at app imports. Unreachable files and their utility imports do not enter Next inputs. Reachable React modules remain whole files with one runtime export each.                                       |
 | Reuse nondeterministic Next output   | Bazel reuses the stored action output when projected inputs match. It never compares two independently rebuilt Next outputs to decide reuse.                                                                          |
 | Share build results                  | Normal package commands and CI use the shared-cache wrapper. Fresh clients restore Next and browser actions through the actual Caddy/bazel-remote stack with disk caching disabled. AWS provisioning remains pending. |
 | Preserve browser coverage            | Two Bazel targets test the deployment archive, covering hydration, interaction, navigation, API and 404 behavior.                                                                                                     |
@@ -156,8 +156,10 @@ It fails explicitly on patterns it cannot track, including computed imports,
 UI styles. Literal dynamic imports into React modules are traversed. Utilities
 require static ESM and cannot contain React/server directives.
 
-Unreachable modules are excluded, but unused exports inside a reachable React
-module can still invalidate Next. Namespace utility imports retain every export.
+Unreachable modules are excluded. A reachable React module stays whole, so the
+projection allows it one runtime export and rejects a second one with a file
+name to move it to. Type exports do not count. Namespace utility imports retain
+every export.
 Files under `app/` and `pages/`, plus `middleware`, `proxy` and
 `instrumentation` files, are conservatively roots. Other app folders count when
 a root imports them, through relative paths or tsconfig `paths`. This is a useful
