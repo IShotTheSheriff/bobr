@@ -108,10 +108,11 @@ separate acceptance step.
 
 ## Cache evidence
 
-The earlier [Linux CI run](https://github.com/ernest-oneteam/bobr/actions/runs/36555048582)
-restored the cache from the previous commit and reported 267 disk-cache hits.
-That established cross-commit reuse through the GitHub Actions archive for the
-previous build graph. It did not test HTTP remote caching or Vercel artifacts.
+[Run 39994616704](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616704)
+restored the previous commit's GitHub Actions cache and reused all 15 targets.
+That shows cross-commit reuse through the Actions archive. It did not test HTTP
+remote caching or Vercel artifacts.
+[Shared cache through Vercel](#shared-cache-through-vercel) covers those.
 
 The current proof creates a local HTTP action/content cache and three independent
 Bazel output bases. The consumer has no producer output directory or disk-cache

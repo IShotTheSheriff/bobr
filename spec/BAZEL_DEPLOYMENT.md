@@ -28,9 +28,8 @@ The local Vercel CLI authenticated to the intended account and created these
 projects. Its credentials are separate from the Vercel connector and GitHub
 Actions. Do not put tokens in chat or in this repository.
 
-CI runs on `IShotTheSheriff/bobr`. Set the values below there; the earlier CI
-fork, `ernest-oneteam/bobr`, holds only the team and project IDs. Create the
-token in the Vercel team settings and store it only as a GitHub secret.
+CI runs on `IShotTheSheriff/bobr`. Set the values below there. Create the token
+in the Vercel team settings and store it only as a GitHub secret.
 Deployment remains disabled until `VERCEL_DEPLOY_ENABLED=1`.
 
 Store these settings on the repository, or on the GitHub environments the
