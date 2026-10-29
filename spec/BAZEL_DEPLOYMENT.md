@@ -106,8 +106,10 @@ CI's results first, then their teammates'. Linux machines reuse CI's builds;
 macOS machines share with each other, because Bazel keys include the platform's
 Node binary.
 
-Set these on `IShotTheSheriff/bobr` for the build job. The token must be a
-repository secret, because the build job uses no environment:
+Set these on `IShotTheSheriff/bobr` for the build job. They must be repository
+settings, because the build job uses no environment. In the web UI they are
+under Settings > Secrets and variables > Actions. With `gh` logged in as a
+repository admin:
 
 ```sh
 gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr     # the same team token

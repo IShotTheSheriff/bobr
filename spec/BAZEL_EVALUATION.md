@@ -72,6 +72,8 @@ Linux runners:
 | Revert of that change                           | Nothing; 15 targets reused, no cache upload                | [39997122124](https://github.com/IShotTheSheriff/bobr/actions/runs/39997122124) |
 | Full invalidation proof with HTTP cache clients | 14 of 14 cases passed                                      | [39994990364](https://github.com/IShotTheSheriff/bobr/actions/runs/39994990364) |
 | Nx script removal, new BUILD-file check         | Only `//:build_files_test`; 14 targets reused              | [40480853937](https://github.com/IShotTheSheriff/bobr/actions/runs/40480853937) |
+| Workflow YAML fix                               | Nothing; 18 targets reused                                 | [40890601484](https://github.com/IShotTheSheriff/bobr/actions/runs/40890601484) |
+| Cache proxy notice fix                          | Only `//tools/bazel:vercel_cache_test`; 17 targets reused  | [40891010787](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010787) |
 
 In the `sub` run, web's Next build, browser test, type check, lint and unit test
 all came from the cache, as did docs' type check and lint.
@@ -80,6 +82,12 @@ The BUILD-file check run on 2026-10-27 also reused both production deployments,
 and each passed the 9-request live check. Locally, the check failed for
 `apps/admin`, `packages/admin-e2e` and `packages/charts` without BUILD files
 and named the file to copy for each.
+
+Since 2026-10-29 each CI run also posts a notice that says what ran. For the
+workflow fix it read "Ran 0 of 18 Next builds and checks. 18 came from cache.
+Shared Bazel cache: off." The Vercel cache proxy posts its hit, miss and upload
+counts the same way. GitHub's public API returns these notices without a login,
+so anyone can check a run without reading its logs.
 
 ## Why the artifact test matters
 
@@ -232,14 +240,19 @@ The first, with no disk cache, built the Next apps and their tests and uploaded
 60 files. The second, a fresh runner with no disk cache and no browser
 libraries, restored both Next builds, both browser tests, both type checks and
 both unit tests: 34 hits, 0 misses and 0 of 6 tests run. The workflow
-`vercel-cache.yml` repeats this when the cache code changes and every week.
+`vercel-cache.yml` repeats this when the cache code changes and every week. On
+2026-10-29 both runners found every result in Vercel, with 34 hits, 0 misses
+and 0 uploads each, and the fresh runner ran 0 of its 8 Next builds and checks
+([40891010840](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010840)).
 
 Two Macs also shared results. A developer Mac uploaded the Next builds and test
 results through the wrapper at commit `a7e8b67`. A fresh `macos-latest` runner,
 a different Mac with no Bazel state and no disk cache, then restored all 8:
 34 hits, 0 misses and 0 of 6 tests run
 ([40469246302](https://github.com/IShotTheSheriff/bobr/actions/runs/40469246302)).
-`vercel-cache-mac.yml` repeats that restore on demand.
+`vercel-cache-mac.yml` repeats that restore on demand. On 2026-10-29 it
+restored all 8 again from the same uploads
+([40889445293](https://github.com/IShotTheSheriff/bobr/actions/runs/40889445293)).
 
 A login older than the CLI's token lifetime returned HTTP 403, so the
 wrapper now runs `vercel whoami`, which renews the login before reading it. If
