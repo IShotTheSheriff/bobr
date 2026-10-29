@@ -36,10 +36,10 @@ jobs:
       BAZEL_CACHE_SIGNING_KEY: ${{ secrets.BAZEL_CACHE_SIGNING_KEY }}
       DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check CI helper behavior
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - name: Check deployment reuse behavior
@@ -87,7 +87,7 @@ jobs:
           fi
       - name: Restore Bazel disk and downloads
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             .bazel-cache
@@ -126,7 +126,7 @@ jobs:
           for app in web docs; do
             cp "bazel-bin/apps/$app/vercel_output.tar" "artifacts/$app.tar"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vercel-output
           path: artifacts/*.tar
@@ -153,13 +153,13 @@ jobs:
           echo "Cache entries: $before restored, $((after - before)) new, $kept kept." >> "$GITHUB_STEP_SUMMARY"
       - name: Save the build cache
         if: steps.trim.outputs.save == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             .bazel-cache
             ~/.bazel-repo
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: browser-test-evidence
@@ -218,18 +218,18 @@ jobs:
           fi
           echo "$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.setup.outputs.deploy == 'true'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.setup.outputs.deploy == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.setup.outputs.deploy == 'true'
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         if: steps.setup.outputs.deploy == 'true'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.setup.outputs.deploy == 'true'
         with:
           name: vercel-output

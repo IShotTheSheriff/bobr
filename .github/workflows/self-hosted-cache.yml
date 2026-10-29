@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - name: Install Bazelisk and browser system libraries
@@ -39,7 +39,7 @@ jobs:
           pipx run --spec cfn-lint cfn-lint infra/bazel-cache/aws.yml
       - name: Verify cache permissions and reuse across fresh clients
         run: python3 scripts/verify-self-hosted-cache.py --bazel --directory "${{ runner.temp }}/self-hosted-proof"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: self-hosted-cache-evidence
