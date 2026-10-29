@@ -76,6 +76,8 @@ Linux runners:
 | Cache proxy notice fix                          | Only `//tools/bazel:vercel_cache_test`; 17 targets reused  | [40891010787](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010787) |
 | Docs test edit with Vercel cache on             | Docs unit test, type check and lint; 25 Vercel uploads     | [40899648722](https://github.com/IShotTheSheriff/bobr/actions/runs/40899648722) |
 | Workflow edit with Vercel cache on              | Nothing; 18 targets reused, no Vercel requests             | [40900397539](https://github.com/IShotTheSheriff/bobr/actions/runs/40900397539) |
+| One runtime export per UI file                  | Only `//tools/bazel:project_ui_test`; 17 targets reused    | [40903539740](https://github.com/IShotTheSheriff/bobr/actions/runs/40903539740) |
+| Invalidation proof with that rule               | 14 of 14 cases passed                                      | [40903539782](https://github.com/IShotTheSheriff/bobr/actions/runs/40903539782) |
 
 In the `sub` run, web's Next build, browser test, type check, lint and unit test
 all came from the cache, as did docs' type check and lint.
