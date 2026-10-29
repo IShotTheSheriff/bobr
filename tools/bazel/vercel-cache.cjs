@@ -153,7 +153,8 @@ if (require.main === module) {
     server.listen(0, "127.0.0.1", () => console.log(server.address().port));
     const stop = () => {
       // In GitHub Actions a notice shows the counts on the run page, outside the logs.
-      const notice = process.env.GITHUB_ACTIONS === "true" ? "::notice title=Vercel cache::" : "";
+      // Bazel's output ends in a color reset without a newline, so start a new line.
+      const notice = process.env.GITHUB_ACTIONS === "true" ? "\n::notice title=Vercel cache::" : "";
       console.error(
         notice +
           `Vercel cache: ${stats.hits} hits, ${stats.misses} misses, ${stats.uploads} uploads` +
