@@ -106,18 +106,18 @@ CI's results first, then their teammates'. Linux machines reuse CI's builds;
 macOS machines share with each other, because Bazel keys include the platform's
 Node binary.
 
-Set these on `IShotTheSheriff/bobr` for the build job. They must be repository
-settings, because the build job uses no environment. In the web UI they are
-under Settings > Secrets and variables > Actions. With `gh` logged in as a
-repository admin:
+The build job uses the deploy jobs' environment, `production` on `main` and
+`preview` elsewhere, with `deployment: false`. It reads the same `VERCEL_TOKEN`
+and records no deployment. Add one more secret to `IShotTheSheriff/bobr`, in
+the web UI under Settings > Secrets and variables > Actions. With `gh` logged in
+as a repository admin:
 
 ```sh
-gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr     # the same team token
 openssl rand -base64 32 | gh secret set BAZEL_CACHE_SIGNING_KEY --repo IShotTheSheriff/bobr
 ```
 
-The signing key turns Vercel's cache on in CI. A repository variable
-`BAZEL_REMOTE_CACHE` overrides that, with another cache's endpoint or `off`.
+The signing key turns Vercel's cache on in CI. A variable `BAZEL_REMOTE_CACHE`
+overrides that, with another cache's endpoint or `off`.
 
 Trusted pushes upload; pull requests only read. Fork PRs receive no secrets and
 use the Actions cache alone.

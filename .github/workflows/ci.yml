@@ -17,6 +17,11 @@ jobs:
     concurrency:
       group: bazel-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
+    # The deploy jobs' environment holds the Vercel token. The build job reads it
+    # from there for the shared cache, without recording a deployment.
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+      deployment: false
     env:
       # The signing key exists only for Vercel's cache, so it turns that cache on.
       # A BAZEL_REMOTE_CACHE variable overrides it with another cache or "off".
@@ -66,14 +71,15 @@ jobs:
           if [ -z "$ready" ]; then
             echo 'BAZEL_REMOTE_CACHE=off' >> "$GITHUB_ENV"
             echo "Shared Bazel cache: off. CI uses its GitHub Actions cache." >> "$GITHUB_STEP_SUMMARY"
-            # This job sees repository settings only, so one saved in an environment
-            # or on the wrong tab looks missing. The warning names it without its
-            # value. Fork pull requests get no secrets, so only pushes warn.
+            # This job sees the repository's settings and those of its environment,
+            # so one saved in another environment or on the wrong tab looks missing.
+            # The warning names it without its value. Fork pull requests get no
+            # secrets, so only pushes warn.
             if [ "$GITHUB_EVENT_NAME" = push ]; then
               if [ -n "$missing" ]; then
-                echo "::warning title=Shared Bazel cache::The shared cache is set to Vercel, but CI can't see these repository secrets:$missing."
+                echo "::warning title=Shared Bazel cache::The shared cache is set to Vercel, but CI can't see these secrets in the repository or the $DEPLOY_TARGET environment:$missing."
               elif [ "$BAZEL_REMOTE_CACHE" != off ] && [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then
-                echo "::warning title=Shared Bazel cache::BAZEL_CACHE_SIGNING_KEY is set, but the repository variable BAZEL_REMOTE_CACHE is neither vercel nor off."
+                echo "::warning title=Shared Bazel cache::BAZEL_CACHE_SIGNING_KEY is set, but the variable BAZEL_REMOTE_CACHE is neither vercel nor off."
               fi
             fi
           else
