@@ -18,7 +18,9 @@ jobs:
       group: bazel-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     env:
-      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE }}
+      # The signing key exists only for Vercel's cache, so it turns that cache on.
+      # A BAZEL_REMOTE_CACHE variable overrides it with another cache or "off".
+      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE || (secrets.BAZEL_CACHE_SIGNING_KEY != '' && 'vercel' || '') }}
       # Only trusted pushes get writer credentials. PRs require a backend-enforced
       # read-only credential; fork PRs receive no secrets from GitHub.
       BAZEL_REMOTE_HEADER: ${{ github.event_name == 'push' && secrets.BAZEL_REMOTE_WRITE_HEADER || secrets.BAZEL_REMOTE_READ_HEADER }}
@@ -69,9 +71,9 @@ jobs:
             # value. Fork pull requests get no secrets, so only pushes warn.
             if [ "$GITHUB_EVENT_NAME" = push ]; then
               if [ -n "$missing" ]; then
-                echo "::warning title=Shared Bazel cache::BAZEL_REMOTE_CACHE is vercel, but CI can't see these repository secrets:$missing."
-              elif [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then
-                echo "::warning title=Shared Bazel cache::BAZEL_CACHE_SIGNING_KEY is set, but CI can't see the repository variable BAZEL_REMOTE_CACHE=vercel."
+                echo "::warning title=Shared Bazel cache::The shared cache is set to Vercel, but CI can't see these repository secrets:$missing."
+              elif [ "$BAZEL_REMOTE_CACHE" != off ] && [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then
+                echo "::warning title=Shared Bazel cache::BAZEL_CACHE_SIGNING_KEY is set, but the repository variable BAZEL_REMOTE_CACHE is neither vercel nor off."
               fi
             fi
           else

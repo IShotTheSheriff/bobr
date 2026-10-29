@@ -213,7 +213,7 @@ deployments.
 Still open:
 
 - CI uses Vercel's Remote Cache once the repository has the `VERCEL_TOKEN` and
-  `BAZEL_CACHE_SIGNING_KEY` secrets and `BAZEL_REMOTE_CACHE=vercel`. Until then
+  `BAZEL_CACHE_SIGNING_KEY` secrets. Until then
   it reports the shared cache as off and uses the GitHub Actions cache.
 
 ## Shared cache through Vercel

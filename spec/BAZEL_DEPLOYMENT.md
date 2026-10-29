@@ -114,8 +114,10 @@ repository admin:
 ```sh
 gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr     # the same team token
 openssl rand -base64 32 | gh secret set BAZEL_CACHE_SIGNING_KEY --repo IShotTheSheriff/bobr
-gh variable set BAZEL_REMOTE_CACHE --repo IShotTheSheriff/bobr --body vercel
 ```
+
+The signing key turns Vercel's cache on in CI. A repository variable
+`BAZEL_REMOTE_CACHE` overrides that, with another cache's endpoint or `off`.
 
 Trusted pushes upload; pull requests only read. Fork PRs receive no secrets and
 use the Actions cache alone.
