@@ -1,8 +1,11 @@
 // Run after updating Playwright. Browser versions and hashes are generated here.
-const fs = require("node:fs");
-const path = require("node:path");
-const https = require("node:https");
-const { createHash } = require("node:crypto");
+import fs from "node:fs";
+import path from "node:path";
+import https from "node:https";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 const test = require.resolve("@playwright/test", {
   paths: [path.resolve("packages/web-e2e")],
 });
@@ -13,18 +16,18 @@ const core = require.resolve("playwright-core/package.json", {
   paths: [path.dirname(playwright)],
 });
 const browsers = JSON.parse(
-  fs.readFileSync(path.join(path.dirname(core), "browsers.json")),
+  fs.readFileSync(path.join(path.dirname(core), "browsers.json"), "utf8"),
 );
 const version = browsers.browsers.find(
-  (browser) => browser.name === "chromium-headless-shell",
+  (browser: { name: string }) => browser.name === "chromium-headless-shell",
 ).browserVersion;
-function digest(url) {
+function digest(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     https
       .get(url, (response) => {
         if (
-          response.statusCode >= 300 &&
-          response.statusCode < 400 &&
+          response.statusCode! >= 300 &&
+          response.statusCode! < 400 &&
           response.headers.location
         ) {
           response.resume();
@@ -46,7 +49,7 @@ function digest(url) {
   });
 }
 (async () => {
-  const pins = { version, sha256: {} };
+  const pins = { version, sha256: {} as Record<string, string> };
   for (const platform of ["mac-arm64", "linux64"]) {
     pins.sha256[platform] = await digest(
       `https://cdn.playwright.dev/builds/cft/${version}/${platform}/chrome-headless-shell-${platform}.zip`,

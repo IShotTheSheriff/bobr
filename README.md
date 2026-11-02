@@ -30,7 +30,7 @@ Linux x64 and macOS arm64. Linux also needs Chromium's system libraries, which
 CI installs with the pinned Playwright CLI. Locally, run
 `pnpm --filter @repo/web-e2e exec playwright install-deps chromium`.
 Bazel downloads the pinned browser. After updating Playwright, run
-`node scripts/update-chromium.cjs` to generate its version and archive hashes.
+`node scripts/update-chromium.ts` to generate its version and archive hashes.
 
 `pnpm build`, `pnpm test` and CI use `scripts/bazel.py`. If you are logged into
 the Vercel CLI, it shares Next builds and test results with your teammates

@@ -1,12 +1,15 @@
-const path = require("node:path");
-const { fork, spawn } = require("node:child_process");
+import path from "node:path";
+import { fork, spawn } from "node:child_process";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 const [output, executable, config] = process.argv
   .slice(2)
-  .map((value) => path.resolve(value));
-const temp = process.env.TEST_TMPDIR;
+  .map((value) => path.resolve(value)) as [string, string, string];
+const temp = process.env.TEST_TMPDIR!;
 // Extract and run the artifact with native Node outside the runfiles fs patch.
 const server = fork(
-  path.join(__dirname, "artifact-server.cjs"),
+  path.join(import.meta.dirname, "artifact-server.ts"),
   [output, temp],
   {
     execPath: process.env.JS_BINARY__NODE_BINARY || process.execPath,

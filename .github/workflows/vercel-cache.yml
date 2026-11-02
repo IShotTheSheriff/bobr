@@ -6,7 +6,7 @@ on:
   push:
     branches: ["main", "bazel"]
     paths:
-      - tools/bazel/vercel-cache.cjs
+      - tools/bazel/vercel-cache.ts
       - scripts/bazel.py
       - .github/workflows/vercel-cache.yml
   schedule:

@@ -64,7 +64,7 @@ get a login page instead of the app. Locally, `vercel curl` sends authenticated
 requests to a protected deployment.
 
 After each deploy or reuse, CI compares the live URL with the archive the
-browser tests passed. `tools/bazel/check-deployment.cjs` serves that archive
+browser tests passed. `tools/bazel/check-deployment.ts` serves that archive
 locally and requests `/`, `/demo`, `/api/hello`, a missing page and the home
 page's static assets from both. Status codes, page titles and API bodies must
 match, and every asset must load. To let CI through Vercel Authentication,
@@ -87,7 +87,7 @@ key. Runtime secrets belong in Vercel, not cached build artifacts.
 
 Bóbr shares Bazel results through the team's Vercel Remote Cache, the store
 Turborepo uses. Bazel cannot talk to it directly, so `scripts/bazel.py` starts
-`tools/bazel/vercel-cache.cjs`, a localhost proxy that translates Bazel's HTTP
+`tools/bazel/vercel-cache.ts`, a localhost proxy that translates Bazel's HTTP
 cache protocol into Vercel's `/v8/artifacts` API. Developers run `vercel login`
 once; the wrapper finds that login, or `VERCEL_TOKEN`, and uses the cache. Set
 `BAZEL_REMOTE_CACHE=off` to build without it.

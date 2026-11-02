@@ -1,22 +1,23 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const http = require("node:http");
-const os = require("node:os");
-const path = require("node:path");
-const { test } = require("node:test");
-const tar = require("tar");
-const checkDeployment = require("./check-deployment.cjs");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { test, type TestContext } from "node:test";
+import type { AddressInfo } from "node:net";
+import * as tar from "tar";
+import checkDeployment, { serve } from "./check-deployment.ts";
 
 // A minimal Build Output API v3 archive with the routes the check requests.
-function archive(t, greeting) {
+function archive(t: TestContext, greeting: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "deployment-fixture-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const write = (file, content) => {
+  const write = (file: string, content: string) => {
     const target = path.join(root, "output", file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, content);
   };
-  const handler = (name, source) => {
+  const handler = (name: string, source: string) => {
     write(
       `functions/${name}.func/.vc-config.json`,
       JSON.stringify({ handler: "index.js", runtime: "nodejs24.x", launcherType: "Nodejs" }),
@@ -46,30 +47,35 @@ function archive(t, greeting) {
   return file;
 }
 
-async function deployed(t, file) {
-  const server = await checkDeployment.serve(file);
+async function deployed(t: TestContext, file: string) {
+  const server = await serve(file);
   t.after(server.close);
   return server.url;
 }
 
 // Vercel Authentication redirects to its login unless the bypass header matches.
-function protect(t, target, secret, denied = { location: "https://vercel.com/sso-api?url=x" }) {
+function protect(
+  t: TestContext,
+  target: string,
+  secret: string,
+  denied: { location?: string } = { location: "https://vercel.com/sso-api?url=x" },
+) {
   const server = http.createServer((req, res) => {
     if (req.headers["x-vercel-protection-bypass"] !== secret)
-      return res.writeHead(denied.location ? 302 : 401, denied).end();
+      return res.writeHead(denied.location ? 302 : 401, denied as http.OutgoingHttpHeaders).end();
     const upstream = http.request(
-      new URL(req.url, target),
+      new URL(req.url!, target),
       { method: req.method, headers: req.headers },
       (response) => {
-        res.writeHead(response.statusCode, response.headers);
+        res.writeHead(response.statusCode!, response.headers);
         response.pipe(res);
       },
     );
     req.pipe(upstream);
   });
   t.after(() => server.close());
-  return new Promise((resolve) =>
-    server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${server.address().port}`)),
+  return new Promise<string>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`)),
   );
 }
 
@@ -90,12 +96,12 @@ test("a deployment that serves different content fails", async (t) => {
 for (const [name, denied] of [
   ["a redirect to Vercel's login", undefined],
   ["401", {}],
-]) {
+] as [string, { location?: string } | undefined][]) {
   test(`a protected deployment answering ${name} is skipped without a bypass secret`, async (t) => {
     const file = archive(t, "hello web");
     const url = await protect(t, await deployed(t, file), "secret", denied);
     const result = await checkDeployment(file, url);
-    assert.match(result.skipped, /automation bypass secret/);
+    assert.match(result.skipped!, /automation bypass secret/);
   });
 }
 

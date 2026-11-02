@@ -1,17 +1,77 @@
-const { createHash } = require("node:crypto");
+import { createHash } from "node:crypto";
 
-function canonical(value) {
+interface VercelEnv {
+  id?: string;
+  updatedAt?: number;
+  target?: string[] | string;
+  gitBranch?: string;
+  [key: string]: unknown;
+}
+
+interface VercelEnvironment {
+  envs?: VercelEnv[];
+  hiddenProductionEnvCount?: number;
+}
+
+interface VercelProject {
+  id?: string;
+  accountId?: string;
+  sharedEnvironmentVariableIds?: string[];
+  targets?: { production?: { id?: string } };
+  [key: string]: unknown;
+}
+
+interface VercelDeployment {
+  id?: string;
+  uid?: string;
+  url?: string;
+  readyState?: string;
+  deletedAt?: unknown;
+  deleted?: unknown;
+  aliasError?: unknown;
+  isDisabled?: unknown;
+  projectId?: string;
+  target?: string | null;
+  meta?: { bobrKey?: string; bobrScope?: string };
+}
+
+interface VercelDeploymentList {
+  deployments?: (VercelDeployment & { uid: string })[];
+  pagination?: { next?: number | null };
+}
+
+interface KeyInputs {
+  artifact: string;
+  project: VercelProject;
+  environment: VercelEnvironment | null;
+  team: string;
+  target: string;
+  scope: string;
+  cliVersion: string;
+}
+
+interface ReuseOptions {
+  key: string | null;
+  scope: string;
+  target: string;
+  projectId: string;
+  productionId?: string;
+}
+
+type VercelApi = <T>(route: string) => Promise<T | null>;
+
+function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === "object")
     return Object.fromEntries(
       Object.keys(value)
         .sort()
-        .map((key) => [key, canonical(value[key])]),
+        .map((key) => [key, canonical((value as Record<string, unknown>)[key])]),
     );
   return value;
 }
 
-function digest(value) {
+function digest(value: unknown) {
   return createHash("sha256")
     .update(JSON.stringify(canonical(value)))
     .digest("hex");
@@ -25,12 +85,12 @@ function deploymentKey({
   target,
   scope,
   cliVersion,
-}) {
+}: KeyInputs) {
   if (!Array.isArray(environment?.envs))
     throw new Error("Missing Vercel environment inventory");
   // Hidden or unversioned secrets cannot establish that runtime settings match.
   if (
-    environment.hiddenProductionEnvCount > 0 ||
+    (environment.hiddenProductionEnvCount ?? 0) > 0 ||
     project.sharedEnvironmentVariableIds?.length
   )
     return null;
@@ -44,8 +104,8 @@ function deploymentKey({
     };
   });
   if (envs.includes(null)) return null;
-  envs.sort((a, b) => a.id.localeCompare(b.id));
-  const settings = { ...project };
+  (envs as { id: string }[]).sort((a, b) => a.id.localeCompare(b.id));
+  const settings: Record<string, unknown> = { ...project };
   // Deployment history changes after an upload without changing project settings.
   // `crons` records the production deployment whose cron jobs run; the jobs
   // themselves come from the archive. Vercel applies protection bypass secrets
@@ -74,7 +134,7 @@ function deploymentKey({
   });
 }
 
-function reusable(deployment, { key, scope, target, projectId, productionId }) {
+function reusable(deployment: VercelDeployment | null, { key, scope, target, projectId, productionId }: ReuseOptions) {
   return Boolean(
     key &&
     deployment &&
@@ -93,16 +153,16 @@ function reusable(deployment, { key, scope, target, projectId, productionId }) {
   );
 }
 
-async function findReusable(api, options) {
+async function findReusable(api: VercelApi, options: ReuseOptions) {
   if (!options.key) return null;
   if (options.target === "production") {
     if (!options.productionId) return null;
-    const deployment = await api(
+    const deployment = await api<VercelDeployment>(
       `/v13/deployments/${encodeURIComponent(options.productionId)}`,
     );
     return reusable(deployment, options) ? deployment : null;
   }
-  let until;
+  let until: number | undefined;
   // A bounded search may miss an old match, which safely creates a new deployment.
   for (let page = 0; page < 10; page++) {
     const query = new URLSearchParams({
@@ -112,7 +172,7 @@ async function findReusable(api, options) {
       limit: "100",
     });
     if (until) query.set("until", String(until));
-    const result = await api(`/v7/deployments?${query}`);
+    const result = await api<VercelDeploymentList>(`/v7/deployments?${query}`);
     if (!Array.isArray(result?.deployments))
       throw new Error("Missing Vercel deployment list");
     for (const entry of result.deployments) {
@@ -121,13 +181,13 @@ async function findReusable(api, options) {
         entry.meta?.bobrScope !== options.scope
       )
         continue;
-      const deployment = await api(
+      const deployment = await api<VercelDeployment>(
         `/v13/deployments/${encodeURIComponent(entry.uid)}`,
       );
       if (reusable(deployment, options)) return deployment;
     }
     if (!result.pagination?.next || result.pagination.next === until) break;
-    until = result.pagination.next;
+    until = result.pagination.next as number;
   }
   return null;
 }
@@ -135,7 +195,7 @@ async function findReusable(api, options) {
 // After an Instant Rollback, Vercel stops moving production domains to new
 // production deployments until someone promotes one. CI must not undo a
 // person's rollback, so it reports the pin instead.
-function productionPin(project, deployment, url) {
+function productionPin(project: VercelProject | null, deployment: VercelDeployment, url: string) {
   const serving = project?.targets?.production?.id;
   if (!serving || serving === deployment.id) return null;
   return (
@@ -144,4 +204,5 @@ function productionPin(project, deployment, url) {
   );
 }
 
-module.exports = { digest, deploymentKey, reusable, findReusable, productionPin };
+export type { VercelApi, VercelDeployment, VercelEnvironment, VercelProject };
+export { digest, deploymentKey, reusable, findReusable, productionPin };

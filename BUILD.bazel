@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 
 # Links the full node_modules tree + the pnpm package store
@@ -13,6 +13,13 @@ exports_files([
     "pnpm-lock.yaml",
     ".npmrc",
 ])
+
+# scripts/ has no BUILD file, so the tools' type check reads its files from here.
+js_library(
+    name = "script_sources",
+    srcs = glob(["scripts/*.ts"]) + ["scripts/package.json"],
+    visibility = ["//tools/bazel:__pkg__"],
+)
 
 # A glob never enters a directory that has its own BUILD.bazel, so this only
 # matches workspace packages that Bazel would otherwise skip. The paths are the

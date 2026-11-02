@@ -43,7 +43,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - name: Check deployment reuse behavior
-        run: node --test scripts/test_vercel_reuse.cjs
+        run: node --test scripts/test_vercel_reuse.ts
       - name: Install Bazelisk
         run: npm install -g @bazel/bazelisk
       # Only browser tests that actually execute need these libraries, and the
@@ -255,7 +255,7 @@ jobs:
           DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
           DEPLOY_SCOPE: ${{ github.repository }}:${{ github.ref }}
           VERCEL_FORCE_DEPLOY: ${{ vars.VERCEL_FORCE_DEPLOY }}
-        run: node scripts/deploy-vercel.cjs "artifacts/$APP.tar" "$DEPLOY_TARGET"
+        run: node scripts/deploy-vercel.ts "artifacts/$APP.tar" "$DEPLOY_TARGET"
       # Compares the live deployment, reused or new, with the archive the browser
       # tests passed. Protected deployments need the automation bypass secret.
       - name: Compare the deployment with the tested archive
@@ -264,4 +264,4 @@ jobs:
           APP: ${{ matrix.app }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
-        run: node tools/bazel/check-deployment.cjs "artifacts/$APP.tar" "$DEPLOYMENT_URL"
+        run: node tools/bazel/check-deployment.ts "artifacts/$APP.tar" "$DEPLOYMENT_URL"

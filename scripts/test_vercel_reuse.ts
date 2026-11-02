@@ -1,13 +1,27 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const {
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
   deploymentKey,
   findReusable,
   reusable,
   productionPin,
-} = require("./vercel-reuse.cjs");
+  type VercelApi,
+  type VercelDeployment,
+  type VercelEnvironment,
+  type VercelProject,
+} from "./vercel-reuse.ts";
 
-function inputs() {
+interface Inputs {
+  artifact: string;
+  project: VercelProject;
+  environment: VercelEnvironment;
+  team: string;
+  target: string;
+  scope: string;
+  cliVersion: string;
+}
+
+function inputs(): Inputs {
   return {
     artifact: "archive-sha",
     project: { id: "project", nodeVersion: "24.x", updatedAt: 1 },
@@ -18,7 +32,7 @@ function inputs() {
     cliVersion: "61.0.0",
   };
 }
-const options = {
+const options: Parameters<typeof reusable>[1] = {
   key: "key",
   scope: "pr-6",
   target: "preview",
@@ -38,14 +52,14 @@ function ready() {
 test("artifact, settings, secret rotation, scope, CLI and target changes require deployment", () => {
   const initial = deploymentKey(inputs());
   for (const change of [
-    (i) => (i.artifact = "different-archive"),
-    (i) => (i.project.nodeVersion = "26.x"),
-    (i) => i.environment.envs[0].updatedAt++,
-    (i) => (i.environment.envs = []),
-    (i) => (i.scope = "pr-7"),
-    (i) => (i.team = "other-team"),
-    (i) => (i.target = "production"),
-    (i) => (i.cliVersion = "62.0.0"),
+    (i: Inputs) => (i.artifact = "different-archive"),
+    (i: Inputs) => (i.project.nodeVersion = "26.x"),
+    (i: Inputs) => i.environment.envs![0]!.updatedAt!++,
+    (i: Inputs) => (i.environment.envs = []),
+    (i: Inputs) => (i.scope = "pr-7"),
+    (i: Inputs) => (i.team = "other-team"),
+    (i: Inputs) => (i.target = "production"),
+    (i: Inputs) => (i.cliVersion = "62.0.0"),
   ]) {
     const input = inputs();
     change(input);
@@ -59,7 +73,7 @@ test("deployment history, bypass secrets and object key order do not change iden
     updatedAt: 2,
     nodeVersion: "24.x",
     id: "project",
-    targets: { production: "other" },
+    targets: { production: "other" } as VercelProject["targets"],
     latestDeployments: ["new"],
     protectionBypass: { "bypass-secret": { scope: "automation-bypass" } },
     crons: { deploymentId: "dpl_new", updatedAt: 3, definitions: [] },
@@ -69,9 +83,9 @@ test("deployment history, bypass secrets and object key order do not change iden
 
 test("secret values are excluded and incomplete environment inventories disable reuse", () => {
   const input = inputs();
-  input.environment.envs[0].value = "never-publish-this";
+  input.environment.envs![0]!.value = "never-publish-this";
   assert.equal(deploymentKey(input), deploymentKey(inputs()));
-  delete input.environment.envs[0].updatedAt;
+  delete input.environment.envs![0]!.updatedAt;
   assert.equal(deploymentKey(input), null);
   input.environment = { envs: [], hiddenProductionEnvCount: 1 };
   assert.equal(deploymentKey(input), null);
@@ -112,21 +126,21 @@ test("production reuse requires the current production deployment, including aft
     reusable(deployed, { ...opts, productionId: "rolled-back-to" }),
     false,
   );
-  const routes = [];
+  const routes: string[] = [];
   assert.equal(
-    await findReusable(async (route) => {
+    await findReusable((async (route: string) => {
       routes.push(route);
       return deployed;
-    }, opts),
+    }) as VercelApi, opts),
     deployed,
   );
   assert.deepEqual(routes, ["/v13/deployments/deployment"]);
 });
 
 test("preview lookup paginates and ignores a deleted match before reusing a live one", async () => {
-  const routes = [];
+  const routes: string[] = [];
   const deployed = ready();
-  const api = async (route) => {
+  const api = (async (route: string) => {
     routes.push(route);
     if (route === "/v13/deployments/deleted") return null;
     if (route === "/v13/deployments/deployment") return deployed;
@@ -139,10 +153,10 @@ test("preview lookup paginates and ignores a deleted match before reusing a live
       ],
       pagination: { next: second ? null : 100 },
     };
-  };
+  }) as VercelApi;
   assert.equal(await findReusable(api, options), deployed);
   assert.equal(routes.length, 4);
-  assert.match(routes[2], /until=100/);
+  assert.match(routes[2]!, /until=100/);
 });
 
 test("an API error fails instead of claiming reuse or silently deploying", async () => {
@@ -159,7 +173,7 @@ test("a rollback pin is reported instead of claiming the new deployment is live"
   assert.equal(productionPin({ targets: { production: { id: "dpl_new" } } }, { id: "dpl_new" }, url), null);
   assert.equal(productionPin({ targets: {} }, { id: "dpl_new" }, url), null);
   assert.match(
-    productionPin({ targets: { production: { id: "dpl_old" } } }, { id: "dpl_new" }, url),
+    productionPin({ targets: { production: { id: "dpl_old" } } }, { id: "dpl_new" }, url)!,
     /dpl_old.*vercel promote https:\/\/bobr-new\.vercel\.app/,
   );
 });
