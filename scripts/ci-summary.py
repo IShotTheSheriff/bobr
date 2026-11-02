@@ -41,13 +41,29 @@ def report(ran, cached):
     return "\n".join(lines) + "\n"
 
 
+def notice(ran, cached, cache=""):
+    """A GitHub annotation, readable on the run page and through the public API without logs."""
+    total = len(ran) + len(cached)
+    if ran:
+        text = f"Ran {len(ran)} of {total} Next builds and checks: {', '.join(sorted(ran))}."
+    else:
+        text = f"Ran 0 of {total} Next builds and checks."
+    text += f" {len(cached)} came from cache."
+    if cache:
+        text += f" Shared Bazel cache: {cache}."
+    return "::notice title=What this commit ran::" + text
+
+
 def main():
     entries = [spawn for path in sys.argv[1:] if Path(path).exists() for spawn in spawns(path)]
-    text = report(*summarize(entries))
+    ran, cached = summarize(entries)
+    text = report(ran, cached)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
             summary.write(text)
     print(text)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(notice(ran, cached, os.environ.get("BAZEL_REMOTE_CACHE", "")))
 
 
 if __name__ == "__main__":

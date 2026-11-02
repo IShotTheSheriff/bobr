@@ -159,8 +159,8 @@ and dynamic literal imports in the app conservatively retain all exports.
 Direct utility subpaths, computed app imports, dynamic utility imports,
 `require` or `eval` in utilities, and React/server directives in utilities fail
 with an explicit error. Changed package export mappings also require updating
-the projection. React modules are copied without bundling. Changes to unrelated
-React components can therefore still invalidate both apps. New Bazel packages
+the projection. React modules are copied without bundling, so each may export
+one runtime value. The projection rejects a second one. New Bazel packages
 must still be included in the UI source filegroups.
 
 `//tools/bazel:project_ui_test` covers namespace/default exports, effects hidden

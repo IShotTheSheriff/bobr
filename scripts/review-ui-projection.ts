@@ -1,14 +1,15 @@
 // Reproduce the acceptance gaps found during the Bazel evaluation.
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const esbuild = require("esbuild");
-const projectUi = require("../tools/bazel/project-ui.cjs");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import esbuild from "esbuild";
+import projectUi from "../tools/bazel/project-ui.ts";
 
+const effects = globalThis as { __bobrReviewEffect?: unknown };
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "bobr-projection-review-"));
 
-async function fixture(name, appSource, sources) {
+async function fixture(name: string, appSource: string, sources: Record<string, string>) {
   const dir = path.join(root, name);
   const app = path.join(dir, "app");
   const source = path.join(dir, "ui");
@@ -37,8 +38,8 @@ async function fixture(name, appSource, sources) {
   };
 }
 
-async function evaluate(app, alias) {
-  delete globalThis.__bobrReviewEffect;
+async function evaluate(app: string, alias: string) {
+  delete effects.__bobrReviewEffect;
   const result = await esbuild.build({
     entryPoints: [path.join(app, "page.ts")],
     alias: { "@repo/ui": alias },
@@ -47,7 +48,7 @@ async function evaluate(app, alias) {
     format: "esm",
     platform: "node",
   });
-  const code = result.outputFiles[0].text + "\n// " + alias;
+  const code = result.outputFiles[0]!.text + "\n// " + alias;
   return (
     await import(
       "data:text/javascript;base64," + Buffer.from(code).toString("base64")
@@ -92,9 +93,9 @@ async function main() {
     },
     {
       requirement: "ignore a utility used only by an unreachable component",
-      pass: unused[0].utility === unused[1].utility,
-      before: unused[0].utility,
-      after: unused[1].utility,
+      pass: unused[0]!.utility === unused[1]!.utility,
+      before: unused[0]!.utility,
+      after: unused[1]!.utility,
     },
   ];
   console.log(JSON.stringify(results, null, 2));
@@ -107,6 +108,6 @@ main()
     process.exitCode = 1;
   })
   .finally(() => {
-    delete globalThis.__bobrReviewEffect;
+    delete effects.__bobrReviewEffect;
     fs.rmSync(root, { recursive: true, force: true });
   });

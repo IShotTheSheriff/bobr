@@ -86,7 +86,7 @@ def start_vercel_cache(env, token):
     """Starts the localhost proxy to Vercel's Remote Cache and returns it with its port."""
     try:
         proxy = subprocess.Popen(
-            ["node", str(ROOT / "tools/bazel/vercel-cache.cjs")],
+            ["node", str(ROOT / "tools/bazel/vercel-cache.ts")],
             env={**env, "VERCEL_TOKEN": token, "BOBR_VERCEL_TEAM": env.get("BOBR_VERCEL_TEAM", VERCEL_TEAM),
                  "BAZEL_REMOTE_UPLOAD": "1" if uploads_to_vercel(env) else "0"},
             stdout=subprocess.PIPE, text=True)

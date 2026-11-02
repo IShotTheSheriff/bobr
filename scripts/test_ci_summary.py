@@ -26,6 +26,15 @@ class CiSummaryTest(unittest.TestCase):
         self.assertEqual(ran, {"//apps/web:lint": "Check"})
         self.assertEqual(cached, {})
 
+    def test_notice_names_what_ran_and_the_shared_cache(self):
+        line = summary.notice({"//apps/docs:next_build": "Next build"}, {"//apps/web:next_build": "Next build"}, "vercel")
+        self.assertEqual(line, "::notice title=What this commit ran::Ran 1 of 2 Next builds and checks: "
+                               "//apps/docs:next_build. 1 came from cache. Shared Bazel cache: vercel.")
+
+    def test_notice_for_a_run_that_reused_everything(self):
+        line = summary.notice({}, {"//apps/web:lint": "Check", "//apps/web:typecheck": "Check"})
+        self.assertEqual(line, "::notice title=What this commit ran::Ran 0 of 2 Next builds and checks. 2 came from cache.")
+
 
 if __name__ == "__main__":
     unittest.main()

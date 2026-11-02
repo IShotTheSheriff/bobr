@@ -1,45 +1,50 @@
 // A test adapter for this PoC's routes. Vercel owns routing in deployment.
-const fs = require("node:fs");
-const path = require("node:path");
-const http = require("node:http");
-const { fork } = require("node:child_process");
+import fs from "node:fs";
+import path from "node:path";
+import http from "node:http";
+import { fork, type ChildProcess } from "node:child_process";
+import type { AddressInfo } from "node:net";
+import { createRequire } from "node:module";
+import * as tar from "tar";
+import checkArtifact from "./check-artifact.ts";
 
 if (process.argv[2] === "--function") {
-  const directory = process.argv[3];
+  const directory = process.argv[3]!;
   const config = JSON.parse(
-    fs.readFileSync(path.join(directory, ".vc-config.json")),
+    fs.readFileSync(path.join(directory, ".vc-config.json"), "utf8"),
   );
-  const handler = require(path.join(directory, config.handler));
+  // Vercel generates CommonJS handlers.
+  const handler: http.RequestListener = createRequire(import.meta.url)(path.join(directory, config.handler));
   http
     .createServer((req, res) =>
-      Promise.resolve(handler(req, res)).catch((error) => {
+      Promise.resolve<unknown>(handler(req, res)).catch((error) => {
         console.error(error);
         res.writeHead(500).end(String(error));
       }),
     )
-    .listen(0, "127.0.0.1", function () {
-      process.send(this.address().port);
+    .listen(0, "127.0.0.1", function (this: http.Server) {
+      process.send!((this.address() as AddressInfo).port);
     });
 } else {
-  const root = fs.mkdtempSync(path.join(process.argv[3], "artifact-"));
-  require("tar").x({
-    file: path.resolve(process.argv[2]),
+  const root = fs.mkdtempSync(path.join(process.argv[3]!, "artifact-"));
+  tar.x({
+    file: path.resolve(process.argv[2]!),
     cwd: root,
     sync: true,
   });
-  require("./check-artifact.cjs")(root);
-  const children = [];
-  const start = (name) =>
-    new Promise((resolve, reject) => {
+  checkArtifact(root);
+  const children: ChildProcess[] = [];
+  const start = (name: string) =>
+    new Promise<number>((resolve, reject) => {
       const child = fork(
-        __filename,
+        import.meta.filename,
         ["--function", path.join(root, "functions", name + ".func")],
         {
           env: { ...process.env, NODE_ENV: "production" },
         },
       );
       children.push(child);
-      child.once("message", resolve);
+      child.once("message", (port) => resolve(port as number));
       child.once("error", reject);
       child.once("exit", (code) =>
         reject(new Error(`Function exited: ${code}`)),
@@ -47,7 +52,7 @@ if (process.argv[2] === "--function") {
     });
   Promise.all([start("index"), start("api/hello")])
     .then(([pages, api]) => {
-      const types = {
+      const types: Record<string, string> = {
         ".js": "text/javascript",
         ".css": "text/css",
         ".svg": "image/svg+xml",
@@ -56,7 +61,7 @@ if (process.argv[2] === "--function") {
       };
       http
         .createServer((req, res) => {
-          const pathname = new URL(req.url, "http://localhost").pathname;
+          const pathname = new URL(req.url!, "http://localhost").pathname;
           const file = path.resolve(
             root,
             "static",
@@ -83,7 +88,7 @@ if (process.argv[2] === "--function") {
               headers: req.headers,
             },
             (response) => {
-              res.writeHead(response.statusCode, response.headers);
+              res.writeHead(response.statusCode!, response.headers);
               response.pipe(res);
             },
           );
@@ -92,8 +97,8 @@ if (process.argv[2] === "--function") {
           );
           req.pipe(upstream);
         })
-        .listen(0, "127.0.0.1", function () {
-          process.send(this.address().port);
+        .listen(0, "127.0.0.1", function (this: http.Server) {
+          process.send!((this.address() as AddressInfo).port);
         });
     })
     .catch((error) => {

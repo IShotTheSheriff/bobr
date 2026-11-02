@@ -1,12 +1,17 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { test } = require("node:test");
-const projectUi = require("./project-ui.cjs");
-const esbuild = require("esbuild");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test, type TestContext } from "node:test";
+import projectUi, { projectUiTypes } from "./project-ui.ts";
+import esbuild from "esbuild";
 
-function fixture(t, appSource, utilitySource) {
+const effects = globalThis as {
+  __relativeProjectionEffect?: unknown;
+  __projectionTest?: unknown;
+};
+
+function fixture(t: TestContext, appSource: string, utilitySource: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ui-projection-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = path.join(root, "app");
@@ -33,7 +38,7 @@ for (const specifier of ["./utils", "./utils/index", "./utils/index.js"]) {
       'import { Widget } from "@repo/ui/widget"; export const result = Widget();',
       "globalThis.__relativeProjectionEffect = 42;",
     );
-    t.after(() => delete globalThis.__relativeProjectionEffect);
+    t.after(() => delete effects.__relativeProjectionEffect);
     fs.writeFileSync(
       path.join(f.source, "src/widget.tsx"),
       `import /* comment */ "${specifier}"; export const Widget = () => globalThis.__relativeProjectionEffect;`,
@@ -47,7 +52,7 @@ for (const specifier of ["./utils", "./utils/index", "./utils/index.js"]) {
       format: "esm",
       platform: "node",
     });
-    const code = bundled.outputFiles[0].text + `\n// ${f.output}`;
+    const code = bundled.outputFiles[0]!.text + `\n// ${f.output}`;
     const result = await import(
       `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
     );
@@ -61,7 +66,7 @@ test("relative named imports shake unused values and retain changed effects", as
     path.join(f.source, "src/widget.tsx"),
     'import { used } from /* comment */ "./utils"; export const Widget = () => used;',
   );
-  async function project(used, unused, effect) {
+  async function project(used: number, unused: number, effect: number) {
     fs.writeFileSync(
       path.join(f.source, "src/utils/index.ts"),
       `export const used = ${used}; export const unused = ${unused}; globalThis.__effect = ${effect};`,
@@ -137,8 +142,8 @@ test("sideEffects and PURE annotations cannot hide an observable initializer", a
   await import(
     `data:text/javascript;base64,${Buffer.from(contents).toString("base64")}`
   );
-  assert.equal(globalThis.__projectionTest, 42);
-  delete globalThis.__projectionTest;
+  assert.equal(effects.__projectionTest, 42);
+  delete effects.__projectionTest;
 });
 
 for (const [name, app, utility, error] of [
@@ -174,8 +179,8 @@ for (const [name, app, utility, error] of [
   ],
 ]) {
   test(`rejects unsupported ${name}`, async (t) => {
-    const f = fixture(t, app, utility);
-    await assert.rejects(f.run(), error);
+    const f = fixture(t, app as string, utility as string);
+    await assert.rejects(f.run(), error as RegExp);
   });
 }
 
@@ -253,7 +258,7 @@ for (const code of [
 test("rejects export-map overrides instead of projecting the wrong module", async (t) => {
   const f = fixture(t, 'import "@repo/ui/widget";', "");
   const metadata = JSON.parse(
-    fs.readFileSync(path.join(f.source, "package.json")),
+    fs.readFileSync(path.join(f.source, "package.json"), "utf8"),
   );
   metadata.exports["./widget"] = "./src/another-widget.tsx";
   fs.writeFileSync(
@@ -316,9 +321,34 @@ test("app imports outside the app package fail explicitly", async (t) => {
   await assert.rejects(f.run(), /outside declared app\/UI sources/);
 });
 
-const { projectUiTypes } = projectUi;
+test("a UI file with two runtime exports fails and names a file to split into", async (t) => {
+  const f = fixture(t, 'import { Card } from "@repo/ui/card"; export const page = Card;', "");
+  fs.writeFileSync(
+    path.join(f.source, "src/card.tsx"),
+    "export const Card = () => null;\nexport function CardHeader() { return null; }",
+  );
+  await assert.rejects(
+    f.run(),
+    /^Error: @repo\/ui src\/card\.tsx exports Card, CardHeader\..*src\/card-header\.tsx/,
+  );
+});
 
-function typesFixture(t, appSource, sources) {
+test("types and UI files no app imports do not count against one export per file", async (t) => {
+  const f = fixture(t, 'import { Card } from "@repo/ui/card"; export const page = Card;', "");
+  fs.writeFileSync(
+    path.join(f.source, "src/card.tsx"),
+    "export type CardProps = { title: string };\n" +
+      "export interface CardSlots { header?: string }\n" +
+      "export const Card = (props: CardProps) => props.title;",
+  );
+  fs.writeFileSync(path.join(f.source, "src/unused.tsx"), "export const One = 1;\nexport const Two = 2;");
+  await f.run();
+  assert.ok(fs.existsSync(path.join(f.output, "card.tsx")));
+  assert.ok(!fs.existsSync(path.join(f.output, "unused.tsx")));
+});
+
+
+function typesFixture(t: TestContext, appSource: string, sources: Record<string, string>) {
   const f = fixture(t, appSource, sources["utils/index.ts"] || "");
   for (const [file, content] of Object.entries(sources)) {
     const target = path.join(f.source, "src", file);
@@ -387,7 +417,7 @@ test("type-only imports reach the type view but not the runtime projection", asy
   assert.ok(!fs.existsSync(path.join(f.output, "widget.tsx")));
 });
 
-function files(dir, prefix = "") {
+function files(dir: string, prefix = ""): string[] {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .flatMap((e) =>

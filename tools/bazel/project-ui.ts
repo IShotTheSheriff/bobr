@@ -1,7 +1,21 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const ts = require("typescript");
-const esbuild = require("esbuild");
+import fs from "node:fs";
+import path from "node:path";
+import ts from "typescript";
+import esbuild from "esbuild";
+
+interface TraceOptions {
+  types?: boolean;
+  output?: string;
+}
+
+interface Traced {
+  utils: string;
+  uiRoot: string;
+  reachable: Set<string>;
+  names: Set<string>;
+  wholeNamespace: boolean;
+  imported: boolean;
+}
 
 // Next loads these folders and files itself. Other app files count only when
 // one of them imports them.
@@ -10,7 +24,7 @@ const ENTRY_FILE =
   /^(middleware|proxy|instrumentation|instrumentation-client|mdx-components)\.[cm]?[jt]sx?$/;
 const NOT_TYPE_ROOTS = new Set(["node_modules", ".next", "ui_runtime", "ui_types"]);
 
-function compilerOptions(app) {
+function compilerOptions(app: string): ts.CompilerOptions {
   const config = path.join(app, "tsconfig.json");
   if (!fs.existsSync(config)) return {};
   const parsed = ts.getParsedCommandLineOfConfigFile(
@@ -19,10 +33,10 @@ function compilerOptions(app) {
     {
       ...ts.sys,
       onUnRecoverableConfigFileDiagnostic(diagnostic) {
-        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText));
+        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
       },
     },
-  );
+  )!;
   // TS18003 only reports that no file matched `include`.
   const errors = parsed.errors.filter((diagnostic) => diagnostic.code !== 18003);
   if (errors.length)
@@ -34,7 +48,7 @@ function compilerOptions(app) {
   return parsed.options;
 }
 
-function files(dir) {
+function files(dir: string): string[] {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -43,7 +57,7 @@ function files(dir) {
     );
 }
 
-function parse(file) {
+function parse(file: string) {
   return ts.createSourceFile(
     file,
     fs.readFileSync(file, "utf8"),
@@ -52,7 +66,7 @@ function parse(file) {
   );
 }
 
-function checkExports(source) {
+function checkExports(source: string) {
   const metadata = JSON.parse(
     fs.readFileSync(path.join(source, "package.json"), "utf8"),
   );
@@ -69,16 +83,69 @@ function checkExports(source) {
   }
 }
 
+// The names a module exports at runtime. Types and declarations are left out.
+function runtimeExports(tree: ts.SourceFile) {
+  const names: string[] = [];
+  for (const node of tree.statements) {
+    if (ts.isExportAssignment(node)) {
+      names.push("default");
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.isTypeOnly) continue;
+      if (!node.exportClause) names.push(`* from "${(node.moduleSpecifier as ts.StringLiteral).text}"`);
+      else if (ts.isNamespaceExport(node.exportClause))
+        names.push(node.exportClause.name.text);
+      else
+        for (const item of node.exportClause.elements)
+          if (!item.isTypeOnly) names.push(item.name.text);
+    } else {
+      const modifiers = (ts.canHaveModifiers(node) && ts.getModifiers(node)) || [];
+      const has = (kind: ts.SyntaxKind) => modifiers.some((modifier) => modifier.kind === kind);
+      if (
+        !has(ts.SyntaxKind.ExportKeyword) ||
+        has(ts.SyntaxKind.DeclareKeyword) ||
+        ts.isInterfaceDeclaration(node) ||
+        ts.isTypeAliasDeclaration(node)
+      )
+        continue;
+      if (ts.isVariableStatement(node))
+        for (const declaration of node.declarationList.declarations)
+          names.push(declaration.name.getText(tree));
+      else
+        names.push(has(ts.SyntaxKind.DefaultKeyword) ? "default" : (node as ts.DeclarationStatement).name!.getText(tree));
+    }
+  }
+  return names;
+}
+
+// React modules stay whole for Next, so a UI file is the smallest part of the
+// package an app can depend on. With one runtime export per file, an app's
+// inputs hold only the components it uses.
+function checkOneExport(tree: ts.SourceFile, name: string) {
+  const names = runtimeExports(tree);
+  if (names.length < 2) return;
+  const example = names
+    .slice(1)
+    .find((name) => /^[A-Za-z_$][\w$]*$/.test(name) && name !== "default");
+  const file = example
+    ? `, such as src/${example.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}.tsx`
+    : "";
+  throw new Error(
+    `@repo/ui ${name} exports ${names.join(", ")}. An app rebuilds for every ` +
+      `export of a UI file it imports, so give each export its own file${file}. ` +
+      "Shared helpers can go in src/utils, where apps get only the exports they name.",
+  );
+}
+
 // Follows imports from Next's entry files into the UI package. With `types`,
 // type-only imports count too: the type check needs them, the runtime does not.
-function trace(app, source, { types = false, output } = {}) {
+function trace(app: string, source: string, { types = false, output }: TraceOptions = {}): Traced {
   checkExports(source);
   const utils = path.join(source, "src/utils");
   const uiRoot = path.join(source, "src");
-  const names = new Set();
+  const names = new Set<string>();
   let wholeNamespace = false;
   let imported = false;
-  const reachable = new Set();
+  const reachable = new Set<string>();
   // tsc checks every script the tsconfig includes, tests among them, so the
   // type view starts from all of them.
   const generated = [source, output].filter(Boolean);
@@ -106,14 +173,14 @@ function trace(app, source, { types = false, output } = {}) {
               .map((name) => path.join(dir, name)),
           ),
       ];
-  const visited = new Set();
+  const visited = new Set<string>();
   const { paths = {}, pathsBasePath = app } = compilerOptions(app);
   // tsconfig `paths`, such as create-next-app's "@/*": ["./*"]. As in
   // TypeScript, the pattern with the longest prefix wins.
-  function aliasTargets(specifier) {
-    let best;
+  function aliasTargets(specifier: string) {
+    let best: { prefix: string; suffix: string; wildcard: boolean; targets: string[] } | undefined;
     for (const [pattern, targets] of Object.entries(paths)) {
-      const [prefix, suffix = ""] = pattern.split("*");
+      const [prefix = "", suffix = ""] = pattern.split("*");
       const wildcard = pattern.includes("*");
       if (
         wildcard
@@ -130,11 +197,11 @@ function trace(app, source, { types = false, output } = {}) {
       ? specifier.slice(best.prefix.length, specifier.length - best.suffix.length)
       : "";
     return best.targets.map((target) =>
-      path.resolve(pathsBasePath, target.replace("*", middle)),
+      path.resolve(pathsBasePath as string, target.replace("*", middle)),
     );
   }
-  function follow(specifier, importer) {
-    let candidates;
+  function follow(specifier: string, importer: string) {
+    let candidates: string[] | null;
     if (specifier.startsWith("@repo/ui/")) {
       candidates = [
         path.join(uiRoot, specifier.slice("@repo/ui/".length) + ".tsx"),
@@ -186,7 +253,8 @@ function trace(app, source, { types = false, output } = {}) {
       );
     if (!/\.[cm]?[jt]sx?$/.test(file)) continue;
     const tree = parse(file);
-    function visit(node) {
+    if (reachable.has(file)) checkOneExport(tree, path.relative(source, file));
+    function visit(node: ts.Node) {
       if (
         ts.isMetaProperty(node) ||
         (ts.isCallExpression(node) &&
@@ -231,8 +299,8 @@ function trace(app, source, { types = false, output } = {}) {
       if (ts.isStringLiteralLike(node) && isModuleSpecifier) {
         if (
           !types &&
-          ((ts.isImportDeclaration(parent) && parent.importClause?.isTypeOnly) ||
-            (ts.isExportDeclaration(parent) && parent.isTypeOnly))
+          ((ts.isImportDeclaration(parent!) && parent.importClause?.isTypeOnly) ||
+            (ts.isExportDeclaration(parent!) && parent.isTypeOnly))
         )
           return;
         let utilityImport = node.text === "@repo/ui/utils";
@@ -261,7 +329,7 @@ function trace(app, source, { types = false, output } = {}) {
           follow(node.text, file);
           return;
         }
-        if (ts.isImportDeclaration(parent)) {
+        if (ts.isImportDeclaration(parent!)) {
           const clause = parent.importClause;
           imported = true;
           if (clause?.name) names.add("default");
@@ -283,7 +351,7 @@ function trace(app, source, { types = false, output } = {}) {
   return { utils, uiRoot, reachable, names, wholeNamespace, imported };
 }
 
-function copyReachable({ uiRoot, reachable }, output) {
+function copyReachable({ uiRoot, reachable }: Traced, output: string) {
   fs.rmSync(output, { recursive: true, force: true });
   fs.mkdirSync(output, { recursive: true });
   for (const file of [...reachable].sort()) {
@@ -295,7 +363,7 @@ function copyReachable({ uiRoot, reachable }, output) {
 
 // This boundary covers ordinary TypeScript utilities. React modules keep their
 // original files and directives so Next owns client/server compilation.
-async function projectUi(app, source, output) {
+async function projectUi(app: string, source: string, output: string) {
   const traced = trace(app, source);
   const { utils, names, wholeNamespace, imported } = traced;
   copyReachable(traced, output);
@@ -345,7 +413,7 @@ async function projectUi(app, source, output) {
               );
             }
             const tree = parse(args.path);
-            function validate(node) {
+            function validate(node: ts.Node) {
               if (
                 ts.isStringLiteral(node) &&
                 ["use client", "use server"].includes(node.text)
@@ -379,7 +447,7 @@ async function projectUi(app, source, output) {
   fs.mkdirSync(path.join(output, "utils"), { recursive: true });
   fs.writeFileSync(
     path.join(output, "utils/index.js"),
-    result.outputFiles[0].contents,
+    result.outputFiles[0]!.contents,
   );
   // An explicit side-effect declaration prevents Next from dropping retained effects.
   fs.writeFileSync(
@@ -391,9 +459,9 @@ async function projectUi(app, source, output) {
 
 // Relative module specifiers in a declaration file, resolved to other
 // declaration files in `emitted`.
-function declarationImports(file, text, emitted) {
-  const found = [];
-  function visit(node) {
+function declarationImports(file: string, text: string, emitted: Map<string, string>) {
+  const found: string[] = [];
+  function visit(node: ts.Node) {
     const specifier =
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier
@@ -417,7 +485,7 @@ function declarationImports(file, text, emitted) {
 
 // Declarations for the utility exports the app names. Unnamed exports and
 // function bodies are left out, so they cannot invalidate the app's type check.
-function utilityDeclarations(utils, names, wholeNamespace) {
+function utilityDeclarations(utils: string, names: Set<string>, wholeNamespace: boolean) {
   const out = path.join(utils, "__declarations__");
   const roots = files(utils).filter(
     (f) => f.endsWith(".ts") && !f.endsWith(".d.ts") && !f.endsWith(".test.ts"),
@@ -434,7 +502,7 @@ function utilityDeclarations(utils, names, wholeNamespace) {
     rootDir: utils,
     outDir: out,
   });
-  const emitted = new Map();
+  const emitted = new Map<string, string>();
   program.emit(
     undefined,
     (file, text) =>
@@ -443,19 +511,21 @@ function utilityDeclarations(utils, names, wholeNamespace) {
     true,
   );
   const checker = program.getTypeChecker();
-  const relative = (file) =>
+  const relative = (file: string) =>
     path.relative(utils, file).split(path.sep).join("/").replace(/\.ts$/, "");
   const modules = program
     .getSourceFiles()
     .filter((f) => !f.isDeclarationFile && f.fileName.startsWith(utils + "/"))
-    .map((f) => ({ file: f, symbol: checker.getSymbolAtLocation(f) }))
-    .filter((m) => m.symbol);
+    .flatMap((f) => {
+      const symbol = checker.getSymbolAtLocation(f);
+      return symbol ? [{ file: f, symbol }] : [];
+    });
   const barrel = modules.find((m) => relative(m.file.fileName) === "index");
-  const resolve = (symbol) =>
+  const resolve = (symbol: ts.Symbol) =>
     symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
   const barrelExports = barrel ? checker.getExportsOfModule(barrel.symbol) : [];
-  const entry = [];
-  const needed = new Set();
+  const entry: string[] = [];
+  const needed = new Set<string>();
   const requested = wholeNamespace
     ? barrelExports.map((s) => s.name)
     : [...names].sort();
@@ -468,8 +538,8 @@ function utilityDeclarations(utils, names, wholeNamespace) {
     // Prefer the module that declares the value, then any non-barrel module.
     const candidates = [...modules].sort(
       (a, b) =>
-        (b.file === declaring) - (a.file === declaring) ||
-        (a === barrel) - (b === barrel),
+        Number(b.file === declaring) - Number(a.file === declaring) ||
+        Number(a === barrel) - Number(b === barrel),
     );
     for (const module of candidates) {
       const local = checker
@@ -484,23 +554,23 @@ function utilityDeclarations(utils, names, wholeNamespace) {
       break;
     }
   }
-  const keep = new Set();
+  const keep = new Set<string>();
   const stack = [...needed];
   while (stack.length) {
-    const file = stack.pop();
+    const file = stack.pop()!;
     if (keep.has(file) || !emitted.has(file)) continue;
     keep.add(file);
-    stack.push(...declarationImports(file, emitted.get(file), emitted));
+    stack.push(...declarationImports(file, emitted.get(file)!, emitted));
   }
   return {
     index: entry.length ? entry.join("\n") + "\n" : "export {};\n",
-    declarations: [...keep].sort().map((file) => [file, emitted.get(file)]),
+    declarations: [...keep].sort().map((file): [string, string] => [file, emitted.get(file)!]),
   };
 }
 
 // The view the app's type check compiles against: reachable components,
 // including type-only imports, and declarations for the named utilities.
-function projectUiTypes(app, source, output) {
+function projectUiTypes(app: string, source: string, output: string) {
   const traced = trace(app, source, { types: true, output });
   copyReachable(traced, output);
   const { utils, names, wholeNamespace, imported } = traced;
@@ -515,12 +585,12 @@ function projectUiTypes(app, source, output) {
   fs.writeFileSync(path.join(output, "utils/index.d.ts"), index);
 }
 
-module.exports = projectUi;
-module.exports.projectUiTypes = projectUiTypes;
-if (require.main === module) {
+export default projectUi;
+export { projectUiTypes };
+if (import.meta.main) {
   const args = process.argv.slice(2);
   const types = args[0] === "--types";
-  const [app, source, output] = args.slice(types ? 1 : 0).map((p) => path.resolve(p));
+  const [app, source, output] = args.slice(types ? 1 : 0).map((p) => path.resolve(p)) as [string, string, string];
   Promise.resolve()
     .then(() => (types ? projectUiTypes : projectUi)(app, source, output))
     .catch((error) => {

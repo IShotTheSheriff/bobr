@@ -17,8 +17,15 @@ jobs:
     concurrency:
       group: bazel-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
+    # The deploy jobs' environment holds the Vercel token. The build job reads it
+    # from there for the shared cache, without recording a deployment.
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+      deployment: false
     env:
-      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE }}
+      # The signing key exists only for Vercel's cache, so it turns that cache on.
+      # A BAZEL_REMOTE_CACHE variable overrides it with another cache or "off".
+      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE || (secrets.BAZEL_CACHE_SIGNING_KEY != '' && 'vercel' || '') }}
       # Only trusted pushes get writer credentials. PRs require a backend-enforced
       # read-only credential; fork PRs receive no secrets from GitHub.
       BAZEL_REMOTE_HEADER: ${{ github.event_name == 'push' && secrets.BAZEL_REMOTE_WRITE_HEADER || secrets.BAZEL_REMOTE_READ_HEADER }}
@@ -29,14 +36,14 @@ jobs:
       BAZEL_CACHE_SIGNING_KEY: ${{ secrets.BAZEL_CACHE_SIGNING_KEY }}
       DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check CI helper behavior
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - name: Check deployment reuse behavior
-        run: node --test scripts/test_vercel_reuse.cjs
+        run: node --test scripts/test_vercel_reuse.ts
       - name: Install Bazelisk
         run: npm install -g @bazel/bazelisk
       # Only browser tests that actually execute need these libraries, and the
@@ -52,8 +59,11 @@ jobs:
           PUBLIC_CACHE: ${{ vars.BAZEL_REMOTE_PUBLIC_READ }}
         run: |
           ready=""
+          missing=""
           if [ "$BAZEL_REMOTE_CACHE" = vercel ]; then
-            if [ -n "$VERCEL_TOKEN" ] && [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then ready=1; fi
+            [ -n "$VERCEL_TOKEN" ] || missing="$missing VERCEL_TOKEN"
+            [ -n "$BAZEL_CACHE_SIGNING_KEY" ] || missing="$missing BAZEL_CACHE_SIGNING_KEY"
+            [ -n "$missing" ] || ready=1
           elif [ -n "$BAZEL_REMOTE_CACHE" ]; then
             if [ -n "$BAZEL_REMOTE_HEADER" ] || [ "$PUBLIC_CACHE" = 1 ]; then ready=1; fi
           fi
@@ -61,12 +71,23 @@ jobs:
           if [ -z "$ready" ]; then
             echo 'BAZEL_REMOTE_CACHE=off' >> "$GITHUB_ENV"
             echo "Shared Bazel cache: off. CI uses its GitHub Actions cache." >> "$GITHUB_STEP_SUMMARY"
+            # This job sees the repository's settings and those of its environment,
+            # so one saved in another environment or on the wrong tab looks missing.
+            # The warning names it without its value. Fork pull requests get no
+            # secrets, so only pushes warn.
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              if [ -n "$missing" ]; then
+                echo "::warning title=Shared Bazel cache::The shared cache is set to Vercel, but CI can't see these secrets in the repository or the $DEPLOY_TARGET environment:$missing."
+              elif [ "$BAZEL_REMOTE_CACHE" != off ] && [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then
+                echo "::warning title=Shared Bazel cache::BAZEL_CACHE_SIGNING_KEY is set, but the variable BAZEL_REMOTE_CACHE is neither vercel nor off."
+              fi
+            fi
           else
             echo "Shared Bazel cache: $BAZEL_REMOTE_CACHE." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Restore Bazel disk and downloads
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             .bazel-cache
@@ -105,7 +126,7 @@ jobs:
           for app in web docs; do
             cp "bazel-bin/apps/$app/vercel_output.tar" "artifacts/$app.tar"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vercel-output
           path: artifacts/*.tar
@@ -132,13 +153,13 @@ jobs:
           echo "Cache entries: $before restored, $((after - before)) new, $kept kept." >> "$GITHUB_STEP_SUMMARY"
       - name: Save the build cache
         if: steps.trim.outputs.save == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             .bazel-cache
             ~/.bazel-repo
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: browser-test-evidence
@@ -197,18 +218,18 @@ jobs:
           fi
           echo "$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.setup.outputs.deploy == 'true'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.setup.outputs.deploy == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.setup.outputs.deploy == 'true'
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         if: steps.setup.outputs.deploy == 'true'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.setup.outputs.deploy == 'true'
         with:
           name: vercel-output
@@ -234,7 +255,7 @@ jobs:
           DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
           DEPLOY_SCOPE: ${{ github.repository }}:${{ github.ref }}
           VERCEL_FORCE_DEPLOY: ${{ vars.VERCEL_FORCE_DEPLOY }}
-        run: node scripts/deploy-vercel.cjs "artifacts/$APP.tar" "$DEPLOY_TARGET"
+        run: node scripts/deploy-vercel.ts "artifacts/$APP.tar" "$DEPLOY_TARGET"
       # Compares the live deployment, reused or new, with the archive the browser
       # tests passed. Protected deployments need the automation bypass secret.
       - name: Compare the deployment with the tested archive
@@ -243,4 +264,4 @@ jobs:
           APP: ${{ matrix.app }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
-        run: node tools/bazel/check-deployment.cjs "artifacts/$APP.tar" "$DEPLOYMENT_URL"
+        run: node tools/bazel/check-deployment.ts "artifacts/$APP.tar" "$DEPLOYMENT_URL"

@@ -1,16 +1,28 @@
 // Deploy the archive already built and tested by Bazel.
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { createHash, randomUUID } = require("node:crypto");
-const { spawnSync } = require("node:child_process");
-const { digest, deploymentKey, findReusable } = require("./vercel-reuse.cjs");
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import {
+  digest,
+  deploymentKey,
+  findReusable,
+  productionPin,
+  type VercelDeployment,
+  type VercelEnvironment,
+  type VercelProject,
+} from "./vercel-reuse.ts";
+import checkArtifact from "../tools/bazel/check-artifact.ts";
+
+const require = createRequire(import.meta.url);
 
 async function main() {
   const [archive, target] = process.argv.slice(2);
-  if (!archive || !["preview", "production"].includes(target))
+  if (!archive || !["preview", "production"].includes(target!))
     throw new Error(
-      "Usage: node scripts/deploy-vercel.cjs ARCHIVE preview|production",
+      "Usage: node scripts/deploy-vercel.ts ARCHIVE preview|production",
     );
   for (const key of [
     "VERCEL_TOKEN",
@@ -19,11 +31,11 @@ async function main() {
     "DEPLOY_SCOPE",
   ])
     if (!process.env[key]) throw new Error(`Missing ${key}`);
-  const team = process.env.VERCEL_ORG_ID;
-  const projectId = process.env.VERCEL_PROJECT_ID;
+  const team = process.env.VERCEL_ORG_ID!;
+  const projectId = process.env.VERCEL_PROJECT_ID!;
   const scope = digest(process.env.DEPLOY_SCOPE);
   const artifact = createHash("sha256")
-    .update(fs.readFileSync(archive))
+    .update(fs.readFileSync(archive!))
     .digest("hex");
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "bobr-deploy-"));
   try {
@@ -31,19 +43,19 @@ async function main() {
     fs.mkdirSync(output, { recursive: true });
     const extracted = spawnSync(
       "tar",
-      ["-xf", path.resolve(archive), "-C", output],
+      ["-xf", path.resolve(archive!), "-C", output],
       { stdio: "inherit" },
     );
     if (extracted.status !== 0)
       throw new Error("Cannot extract deployment archive");
-    require("../tools/bazel/check-artifact.cjs")(output);
-    const build = JSON.parse(fs.readFileSync(path.join(output, "builds.json")));
+    checkArtifact(output);
+    const build = JSON.parse(fs.readFileSync(path.join(output, "builds.json"), "utf8"));
     if (build.target !== target)
       throw new Error(
         `Artifact target ${build.target} does not match ${target}`,
       );
     const platform = JSON.parse(
-      fs.readFileSync(path.join(output, "bobr-build.json")),
+      fs.readFileSync(path.join(output, "bobr-build.json"), "utf8"),
     );
     if (
       platform.platform !== "linux" ||
@@ -54,7 +66,7 @@ async function main() {
         "Vercel deployment requires the Linux x64 Node 24 CI artifact",
       );
 
-    async function api(route) {
+    async function api<T>(route: string): Promise<T | null> {
       const url = new URL(route, "https://api.vercel.com");
       url.searchParams.set("teamId", team);
       const response = await fetch(url, {
@@ -67,12 +79,12 @@ async function main() {
         throw new Error(
           `Vercel API request failed with HTTP ${response.status}`,
         );
-      return response.json();
+      return (await response.json()) as T;
     }
-    const project = await api(`/v9/projects/${encodeURIComponent(projectId)}`);
-    if (project?.id !== projectId || project.accountId !== team)
+    const project = await api<VercelProject>(`/v9/projects/${encodeURIComponent(projectId)}`);
+    if (!project || project?.id !== projectId || project.accountId !== team)
       throw new Error("Vercel project/account mismatch");
-    const environment = await api(
+    const environment = await api<VercelEnvironment>(
       `/v10/projects/${encodeURIComponent(projectId)}/env?decrypt=false`,
     );
     const cliPackage = require.resolve("vercel/package.json");
@@ -81,7 +93,7 @@ async function main() {
       project,
       environment,
       team,
-      target,
+      target: target!,
       scope,
       cliVersion: require(cliPackage).version,
     });
@@ -91,7 +103,7 @@ async function main() {
         : await findReusable(api, {
             key,
             scope,
-            target,
+            target: target!,
             projectId,
             productionId: project.targets?.production?.id,
           });
@@ -132,7 +144,7 @@ async function main() {
       url = result.stdout.trim();
       if (!/^https:\/\/[a-zA-Z0-9.-]+\.vercel\.app$/.test(url))
         throw new Error("Missing Vercel deployment URL");
-      const deployed = await api(`/v13/deployments/${new URL(url).hostname}`);
+      const deployed = await api<VercelDeployment>(`/v13/deployments/${new URL(url).hostname}`);
       const problems = [
         deployed?.readyState !== "READY" && `state ${deployed?.readyState}`,
         deployed?.aliasError && "alias error",
@@ -143,6 +155,18 @@ async function main() {
       if (problems.length)
         throw new Error(`Deployment ${url} failed checks: ${problems.join("; ")}`);
       console.log(`Created ${target} deployment: ${url}`);
+      if (target === "production") {
+        const pin = productionPin(
+          await api<VercelProject>(`/v9/projects/${encodeURIComponent(projectId)}`),
+          deployed!,
+          url,
+        );
+        if (pin) {
+          console.log(`::warning::${pin}`);
+          if (process.env.GITHUB_STEP_SUMMARY)
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, pin + "\n");
+        }
+      }
     }
     if (process.env.GITHUB_OUTPUT)
       fs.appendFileSync(

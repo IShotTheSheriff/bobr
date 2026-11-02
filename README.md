@@ -30,7 +30,7 @@ Linux x64 and macOS arm64. Linux also needs Chromium's system libraries, which
 CI installs with the pinned Playwright CLI. Locally, run
 `pnpm --filter @repo/web-e2e exec playwright install-deps chromium`.
 Bazel downloads the pinned browser. After updating Playwright, run
-`node scripts/update-chromium.cjs` to generate its version and archive hashes.
+`node scripts/update-chromium.ts` to generate its version and archive hashes.
 
 `pnpm build`, `pnpm test` and CI use `scripts/bazel.py`. If you are logged into
 the Vercel CLI, it shares Next builds and test results with your teammates
@@ -52,7 +52,9 @@ Code and `package.json`. Bazel reads everything else from the files:
 
 Each app's `BUILD.bazel` is four lines that call `next_app()`. A shared package
 calls `shared_package()`. A new app copies `apps/web/BUILD.bazel` and an e2e
-package, and it needs its own Vercel project.
+package, and it needs its own Vercel project. If a package under `apps/` or
+`packages/` has no `BUILD.bazel`, `//:build_files_test` fails and names the file
+to copy. Without that check Bazel would skip the package and CI would still pass.
 
 CI writes a table to each run's summary page that lists the Next builds and
 checks that ran, and the ones Bazel reused from cache.
@@ -79,10 +81,13 @@ App imports + complete UI sources
 `middleware`, `proxy` and `instrumentation`) into reachable UI components. It
 bundles the utility barrel with only the requested exports. Unreachable
 component files never enter Next's input tree. Reachable React files retain
-their directives and contents. Utility module side effects remain, including
-effects in unused barrel branches and relative side-effect imports. The
-projection ignores `sideEffects: false` and `PURE` annotations when retaining
-those effects.
+their directives and contents, so each UI file may export one runtime value. A
+file is then one component, and an app's inputs hold only the components it
+renders. The projection rejects a second runtime export and names a file to
+move it to. Type exports do not count. Utility module side effects remain,
+including effects in unused barrel branches and relative side-effect imports.
+The projection ignores `sideEffects: false` and `PURE` annotations when
+retaining those effects.
 
 `UiTypes` builds the type checker's view of the same package. It copies the
 components the app's code and tests reach, including type-only imports, and
@@ -115,7 +120,7 @@ run.
 | New utility module that no app imports    | nothing                                | nothing                                   |
 | UI component that no app renders          | nothing                                | nothing                                   |
 | UI component that only web renders        | build, browser tests, type check       | nothing                                   |
-| Unused export added to that web component | build, browser tests, type check       | nothing                                   |
+| Second export added to that web component | rejected, naming a file to move it to  | nothing                                   |
 | New npm dependency used by docs           | nothing                                | build, browser tests, type check, lint    |
 | New folder and component in web           | build, browser tests, type check, lint | nothing                                   |
 | App README                                | nothing                                | nothing                                   |
@@ -171,8 +176,8 @@ AWS provisioning still needs an account and cache domain. Until then, CI keeps
 Bazel's disk cache in the GitHub Actions cache, which pull requests read from
 `main`.
 
-This remains a bounded PoC. Component files count whole, so an unused export
-added to a component that an app renders reruns that app. Namespace imports
+This remains a bounded PoC. React files stay whole for Next, which is why a UI
+file may export only one runtime value. Namespace imports
 retain all utility exports. Unsupported computed imports, asset lookups, utility
 leaf imports and shared UI styles fail explicitly. A new shared workspace package
 gets checks from `shared_package()`, but apps consume it whole until the

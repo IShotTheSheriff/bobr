@@ -19,13 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Check whether this update needs the proof
         id: changes
         run: python3 scripts/next-proof-trigger.py
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.changes.outputs.required == 'true'
         with:
           node-version-file: .nvmrc
@@ -39,7 +39,7 @@ jobs:
         run: python3 scripts/prove-next-invalidation.py --remote --browser --directory "${{ runner.temp }}/bobr-next-proof"
       - name: Save action evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: next-invalidation-evidence
           path: |

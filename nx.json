@@ -40,15 +40,6 @@
       ],
       "cache": true
     },
-    "e2e:test": {
-      "dependsOn": [],
-      "inputs": [
-        "{projectRoot}/src/**/*",
-        "{projectRoot}/package.json",
-        "{projectRoot}/build.hash"
-      ],
-      "cache": true
-    },
     "dev": {
       "cache": false
     }

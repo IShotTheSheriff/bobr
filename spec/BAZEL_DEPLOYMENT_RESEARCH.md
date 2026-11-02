@@ -12,7 +12,7 @@ Bazel records an action's declared files, command and environment, then maps tha
 
 The implementation gives Next the generated `ui_runtime` directory rather than the raw utility package. Its mutation proof checks action execution and complete output bytes. That is the right experiment for the unused-export requirement. See [the build macro](../tools/bazel/defs.bzl), lines 79 and 87, and [the proof](../scripts/prove-next-invalidation.py), lines 67 through 85.
 
-The [Linux CI run](https://github.com/ernest-oneteam/bobr/actions/runs/36552236479) passed all nine proof cases and all three test targets. Its initial Actions cache lookup missed and its final step saved a new cache. This establishes Linux execution of the proof, but supplies no evidence of restoring an earlier CI run's cache.
+The [Linux proof run](https://github.com/IShotTheSheriff/bobr/actions/runs/39994990364) on `IShotTheSheriff/bobr` passed all 14 cases. It shows the proof runs on Linux. [The evaluation](BAZEL_EVALUATION.md#cache-evidence) covers restoring an earlier run's cache.
 
 Inference: byte variation from a cold Next build does not, by itself, prevent reuse of one complete cached artifact. This is narrower than proving arbitrary Next builds safe to share. Bazel explicitly frames safe sharing around reproducible builds and warns about undeclared tools and environment differences. The app must not depend on untracked build inputs. [Bazel remote caching](https://bazel.build/remote/caching)
 

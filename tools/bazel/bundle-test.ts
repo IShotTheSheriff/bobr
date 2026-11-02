@@ -1,10 +1,10 @@
 // Bundle one test file with the code it reaches. Bazel keys the test result on
 // this bundle, so edits to unreachable code or comments reuse the cached result.
-const esbuild = require("esbuild");
+import esbuild from "esbuild";
 
 const [entry, outfile] = process.argv.slice(2);
 esbuild.buildSync({
-  entryPoints: [entry],
+  entryPoints: [entry!],
   outfile,
   bundle: true,
   platform: "node",

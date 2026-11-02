@@ -8,8 +8,8 @@ Bazel computes action keys; developers do not maintain hashes or affected-app li
 The default cache holds up to 50 GiB. Docker volumes persist across restarts.
 Images are pinned by digest. This is a single server, so outages interrupt remote
 cache access. Bazel can rebuild evicted entries; a server outage can still fail a
-CI job. Clear `BAZEL_REMOTE_CACHE` in GitHub variables to temporarily use the CI
-disk cache alone.
+CI job. Set the GitHub variable `BAZEL_REMOTE_CACHE` to `off` to temporarily use
+the CI disk cache alone.
 
 ## AWS VM
 

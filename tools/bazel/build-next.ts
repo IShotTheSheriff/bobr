@@ -1,7 +1,12 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const { pathToFileURL } = require("node:url");
-const { spawnSync } = require("node:child_process");
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import * as tar from "tar";
+import checkArtifact from "./check-artifact.ts";
+
+const require = createRequire(import.meta.url);
 
 // These checked-in settings make the build independent of Vercel account state.
 // Deployment supplies the real project link after retrieving this artifact.
@@ -38,7 +43,7 @@ const result = spawnSync(
     stdio: "inherit",
     env: {
       ...process.env,
-      NODE_OPTIONS: `--import=${pathToFileURL(path.join(__dirname, "trace-fs.cjs")).href}`,
+      NODE_OPTIONS: `--import=${pathToFileURL(path.join(import.meta.dirname, "trace-fs.ts")).href}`,
       VERCEL_TELEMETRY_DISABLED: "1",
       NO_UPDATE_NOTIFIER: "1",
     },
@@ -52,7 +57,7 @@ fs.renameSync(
   path.join(appDirectory, ".vercel/output"),
   path.join(appDirectory, "vercel_output"),
 );
-require("./check-artifact.cjs")(path.join(appDirectory, "vercel_output"));
+checkArtifact(path.join(appDirectory, "vercel_output"));
 
 fs.writeFileSync(
   path.join(appDirectory, "vercel_output/bobr-build.json"),
@@ -65,7 +70,7 @@ fs.writeFileSync(
 
 // The archive is the sole deployment output. It preserves package symlinks
 // through remote caching and runfiles, where expanded directories can differ.
-require("tar").c(
+tar.c(
   {
     cwd: path.join(appDirectory, "vercel_output"),
     file: path.join(appDirectory, "vercel_output.tar"),

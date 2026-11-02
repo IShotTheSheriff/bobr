@@ -7,7 +7,6 @@
     "lint": "nx run-many -t lint",
     "check-types": "nx run-many -t check-types",
     "e2e:test": "python3 scripts/bazel.py test //packages/web-e2e:test //packages/docs-e2e:test",
-    "ci:affected": "tsx scripts/ci-affected.ts",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "test:bazel-next": "python3 scripts/prove-next-invalidation.py --remote --browser",
     "test": "python3 scripts/bazel.py test //..."

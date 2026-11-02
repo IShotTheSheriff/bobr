@@ -1,33 +1,49 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library", "js_test")
+load("@npm//:typescript/package_json.bzl", typescript_bin = "bin")
+
+# Node strips types without checking them, so this test is what checks them.
+typescript_bin.tsc_test(
+    name = "types_test",
+    args = ["-p", "tools/bazel/tsconfig.json"],
+    data = glob(["*.ts"]) + [
+        "package.json",
+        "tsconfig.json",
+        "//:script_sources",
+        "//:node_modules/@types/node",
+        "//:node_modules/esbuild",
+        "//:node_modules/tar",
+        "//:node_modules/typescript",
+    ],
+)
 
 js_binary(
     name = "project_ui",
-    entry_point = "project-ui.cjs",
-    data = ["//:node_modules/esbuild", "//:node_modules/typescript"],
+    entry_point = "project-ui.ts",
+    data = ["package.json", "//:node_modules/esbuild", "//:node_modules/typescript"],
     visibility = ["//visibility:public"],
 )
 
 js_test(
     name = "project_ui_test",
-    entry_point = "project-ui.test.cjs",
-    data = ["project-ui.cjs", "//:node_modules/esbuild", "//:node_modules/typescript"],
+    entry_point = "project-ui.test.ts",
+    data = ["package.json", "project-ui.ts", "//:node_modules/esbuild", "//:node_modules/typescript"],
 )
 
 js_binary(
     name = "bundle_test",
-    entry_point = "bundle-test.cjs",
-    data = ["//:node_modules/esbuild"],
+    entry_point = "bundle-test.ts",
+    data = ["package.json", "//:node_modules/esbuild"],
     visibility = ["//visibility:public"],
 )
 
 js_binary(
     name = "build_next",
-    entry_point = "build-next.cjs",
-    data = ["trace-fs.cjs", "check-artifact.cjs", "//:node_modules/vercel", "//:node_modules/tar"],
+    entry_point = "build-next.ts",
+    data = ["package.json", "trace-fs.ts", "check-artifact.ts", "//:node_modules/vercel", "//:node_modules/tar"],
     visibility = ["//visibility:public"],
 )
 
-exports_files(["chromium-pins.json", "run-playwright.cjs", "artifact-server.cjs", "check-artifact.cjs"])
+exports_files(["chromium-pins.json", "run-playwright.ts", "artifact-server.ts", "check-artifact.ts"])
 
 config_setting(
     name = "production",
@@ -37,36 +53,46 @@ config_setting(
 
 js_library(
     name = "artifact_helpers",
-    srcs = ["artifact-server.cjs", "check-artifact.cjs"],
+    srcs = ["package.json", "artifact-server.ts", "check-artifact.ts"],
     deps = ["//:node_modules/tar"],
     visibility = ["//visibility:public"],
 )
 js_library(
     name = "test_runner",
-    srcs = ["run-playwright.cjs"],
+    srcs = ["run-playwright.ts"],
+    data = ["package.json"],
     deps = [":artifact_helpers"],
     visibility = ["//visibility:public"],
 )
 js_library(
     name = "typecheck",
-    srcs = ["typecheck.cjs"],
+    srcs = ["typecheck.ts"],
+    data = ["package.json"],
     visibility = ["//visibility:public"],
 )
 
 js_library(
     name = "lint",
-    srcs = ["lint.cjs"],
+    srcs = ["lint.ts"],
+    data = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "check_build_files",
+    srcs = ["check-build-files.ts"],
+    data = ["package.json"],
     visibility = ["//visibility:public"],
 )
 
 js_test(
     name = "check_deployment_test",
-    entry_point = "check-deployment.test.cjs",
-    data = ["check-deployment.cjs", ":artifact_helpers", "//:node_modules/tar"],
+    entry_point = "check-deployment.test.ts",
+    data = ["package.json", "check-deployment.ts", ":artifact_helpers", "//:node_modules/tar"],
 )
 
 js_test(
     name = "vercel_cache_test",
-    entry_point = "vercel-cache.test.cjs",
-    data = ["vercel-cache.cjs"],
+    entry_point = "vercel-cache.test.ts",
+    data = ["package.json", "vercel-cache.ts"],
 )

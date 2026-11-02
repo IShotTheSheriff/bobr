@@ -1,17 +1,23 @@
-const assert = require("node:assert/strict");
-const http = require("node:http");
-const { test } = require("node:test");
-const { createCacheProxy, artifactId, sign } = require("./vercel-cache.cjs");
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import type { AddressInfo } from "node:net";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { test, type TestContext } from "node:test";
+import { createCacheProxy, artifactId, sign } from "./vercel-cache.ts";
 
 const HASH = "a".repeat(64);
 
 // Stores artifacts like Vercel's /v8/artifacts API, including x-artifact-tag.
-async function fakeVercel(t, { failFirst } = {}) {
-  const store = new Map();
-  const requests = [];
+async function fakeVercel(t: TestContext, { failFirst }: { failFirst?: number } = {}) {
+  const store = new Map<string, { body: Buffer; tag?: string | string[] }>();
+  const requests: string[] = [];
   let pending = failFirst;
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, "http://x");
+    const url = new URL(req.url!, "http://x");
     const id = url.pathname.replace("/v8/artifacts/", "");
     requests.push(`${req.method} ${id}`);
     if (req.headers.authorization !== "Bearer token" || url.searchParams.get("teamId") !== "team")
@@ -22,8 +28,8 @@ async function fakeVercel(t, { failFirst } = {}) {
       return res.writeHead(status, { "retry-after": "0" }).end();
     }
     if (req.method === "PUT") {
-      const chunks = [];
-      req.on("data", (c) => chunks.push(c));
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", () => {
         store.set(id, { body: Buffer.concat(chunks), tag: req.headers["x-artifact-tag"] });
         res.writeHead(202).end();
@@ -35,20 +41,24 @@ async function fakeVercel(t, { failFirst } = {}) {
     res.writeHead(200, entry.tag ? { "x-artifact-tag": entry.tag } : {});
     res.end(req.method === "GET" ? entry.body : undefined);
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
-  return { api: `http://127.0.0.1:${server.address().port}`, store, requests };
+  return { api: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, store, requests };
 }
 
-async function proxy(t, api, options) {
+async function proxy(
+  t: TestContext,
+  api: string,
+  options?: Partial<Parameters<typeof createCacheProxy>[0]>,
+) {
   const { server, stats } = createCacheProxy({ token: "token", teamId: "team", api, ...options });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
     stats,
-    get: (path) => fetch(base + path),
-    put: (path, body) => fetch(base + path, { method: "PUT", body }),
+    get: (path: string) => fetch(base + path),
+    put: (path: string, body: string) => fetch(base + path, { method: "PUT", body }),
   };
 }
 
@@ -87,7 +97,7 @@ test("CI ignores action results it did not sign and accepts its own", async (t) 
   assert.equal(ci.stats.unsigned, 1);
   await ci.put(`/ac/${HASH}`, "signed result");
   const id = artifactId("ci", "ac", HASH);
-  assert.equal(store.get(id).tag, sign("ci-key", id, Buffer.from("signed result")));
+  assert.equal(store.get(id)!.tag, sign("ci-key", id, Buffer.from("signed result")));
   assert.equal(await (await ci.get(`/ac/${HASH}`)).text(), "signed result");
 });
 
@@ -117,4 +127,41 @@ test("only Bazel cache paths are served", async (t) => {
   const { api } = await fakeVercel(t);
   const reader = await proxy(t, api, {});
   assert.equal((await reader.get("/ac/not-a-digest")).status, 400);
+});
+
+// Starts the proxy in GitHub Actions the way scripts/bazel.py does, with Vercel's
+// status check answered by a stub.
+function runInActions(t: TestContext, status: string) {
+  const dir = fs.mkdtempSync(path.join(process.env.TEST_TMPDIR || os.tmpdir(), "vercel-cache-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, "status.mjs");
+  fs.writeFileSync(stub, `globalThis.fetch = async () => new Response(${JSON.stringify(JSON.stringify({ status }))});`);
+  const child = spawn(process.execPath, ["--import", pathToFileURL(stub).href, path.join(import.meta.dirname, "vercel-cache.ts")], {
+    env: { ...process.env, GITHUB_ACTIONS: "true", VERCEL_TOKEN: "token", BOBR_VERCEL_TEAM: "team" },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  const listening = new Promise<void>((resolve) =>
+    child.stdout.on("data", (chunk) => (stdout += chunk).includes("\n") && resolve()),
+  );
+  const exit = new Promise<{ code: number | null; stderr: string }>((resolve) => child.on("exit", (code) => resolve({ code, stderr })));
+  return { child, listening, exit };
+}
+
+test("in GitHub Actions an unavailable cache is a run warning", async (t) => {
+  const { code, stderr } = await runInActions(t, "disabled").exit;
+  assert.equal(code, 1);
+  assert.equal(stderr, "::warning title=Vercel cache::Vercel's Remote Cache is unavailable: disabled\n");
+});
+
+test("in GitHub Actions the counts notice starts its own line", async (t) => {
+  // Bazel's output ends in a color reset without a newline, and the runner reads
+  // a command only at the start of a line.
+  const run = runInActions(t, "enabled");
+  await run.listening;
+  run.child.kill("SIGTERM");
+  const { code, stderr } = await run.exit;
+  assert.equal(code, 0);
+  assert.equal(stderr, "\n::notice title=Vercel cache::Vercel cache: 0 hits, 0 misses, 0 uploads\n");
 });

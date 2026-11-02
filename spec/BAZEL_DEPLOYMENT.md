@@ -28,9 +28,8 @@ The local Vercel CLI authenticated to the intended account and created these
 projects. Its credentials are separate from the Vercel connector and GitHub
 Actions. Do not put tokens in chat or in this repository.
 
-CI runs on `IShotTheSheriff/bobr`. Set the values below there; the earlier CI
-fork, `ernest-oneteam/bobr`, holds only the team and project IDs. Create the
-token in the Vercel team settings and store it only as a GitHub secret.
+CI runs on `IShotTheSheriff/bobr`. Set the values below there. Create the token
+in the Vercel team settings and store it only as a GitHub secret.
 Deployment remains disabled until `VERCEL_DEPLOY_ENABLED=1`.
 
 Store these settings on the repository, or on the GitHub environments the
@@ -65,7 +64,7 @@ get a login page instead of the app. Locally, `vercel curl` sends authenticated
 requests to a protected deployment.
 
 After each deploy or reuse, CI compares the live URL with the archive the
-browser tests passed. `tools/bazel/check-deployment.cjs` serves that archive
+browser tests passed. `tools/bazel/check-deployment.ts` serves that archive
 locally and requests `/`, `/demo`, `/api/hello`, a missing page and the home
 page's static assets from both. Status codes, page titles and API bodies must
 match, and every asset must load. To let CI through Vercel Authentication,
@@ -88,7 +87,7 @@ key. Runtime secrets belong in Vercel, not cached build artifacts.
 
 Bóbr shares Bazel results through the team's Vercel Remote Cache, the store
 Turborepo uses. Bazel cannot talk to it directly, so `scripts/bazel.py` starts
-`tools/bazel/vercel-cache.cjs`, a localhost proxy that translates Bazel's HTTP
+`tools/bazel/vercel-cache.ts`, a localhost proxy that translates Bazel's HTTP
 cache protocol into Vercel's `/v8/artifacts` API. Developers run `vercel login`
 once; the wrapper finds that login, or `VERCEL_TOKEN`, and uses the cache. Set
 `BAZEL_REMOTE_CACHE=off` to build without it.
@@ -107,14 +106,18 @@ CI's results first, then their teammates'. Linux machines reuse CI's builds;
 macOS machines share with each other, because Bazel keys include the platform's
 Node binary.
 
-Set these on `IShotTheSheriff/bobr` for the build job. The token must be a
-repository secret, because the build job uses no environment:
+The build job uses the deploy jobs' environment, `production` on `main` and
+`preview` elsewhere, with `deployment: false`. It reads the same `VERCEL_TOKEN`
+and records no deployment. Add one more secret to `IShotTheSheriff/bobr`, in
+the web UI under Settings > Secrets and variables > Actions. With `gh` logged in
+as a repository admin:
 
 ```sh
-gh secret set VERCEL_TOKEN --repo IShotTheSheriff/bobr     # the same team token
 openssl rand -base64 32 | gh secret set BAZEL_CACHE_SIGNING_KEY --repo IShotTheSheriff/bobr
-gh variable set BAZEL_REMOTE_CACHE --repo IShotTheSheriff/bobr --body vercel
 ```
+
+The signing key turns Vercel's cache on in CI. A variable `BAZEL_REMOTE_CACHE`
+overrides that, with another cache's endpoint or `off`.
 
 Trusted pushes upload; pull requests only read. Fork PRs receive no secrets and
 use the Actions cache alone.
@@ -160,6 +163,12 @@ URL when the record still exists and is ready. Production reuse requires the
 current production deployment, so a rollback cannot accidentally reuse an older
 record. Missing environment version metadata disables reuse. Set
 `VERCEL_FORCE_DEPLOY=1` as an Actions variable to force a new deployment.
+
+After an [Instant Rollback](https://vercel.com/docs/deployments/instant-rollback),
+Vercel keeps production on the rolled-back deployment until someone promotes a
+newer one. CI then still deploys each tested archive to production, warns that
+production serves another deployment, and prints the `vercel promote` command.
+It never promotes on its own, so a rollback during an incident stays in place.
 
 Deployment jobs serialize per app and ref and skip superseded commits before
 uploading. Project metadata can conservatively cause a new deployment even when

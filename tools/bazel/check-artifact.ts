@@ -1,12 +1,12 @@
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 
-module.exports = function checkArtifact(directory) {
+export default function checkArtifact(directory: string) {
   const root = fs.realpathSync(directory);
-  const config = JSON.parse(fs.readFileSync(path.join(root, "config.json")));
+  const config = JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8"));
   if (config.version !== 3)
     throw new Error("Expected Vercel Build Output API v3");
-  function visit(dir) {
+  function visit(dir: string) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name);
       if (entry.isSymbolicLink()) {
@@ -19,7 +19,7 @@ module.exports = function checkArtifact(directory) {
         }
       } else if (entry.isDirectory()) visit(file);
       else if (entry.name === ".vc-config.json") {
-        const metadata = JSON.parse(fs.readFileSync(file));
+        const metadata = JSON.parse(fs.readFileSync(file, "utf8"));
         if (metadata.filePathMap)
           throw new Error(`Function still references build inputs: ${file}`);
         if (!fs.existsSync(path.join(dir, metadata.handler)))
@@ -28,4 +28,4 @@ module.exports = function checkArtifact(directory) {
     }
   }
   visit(root);
-};
+}

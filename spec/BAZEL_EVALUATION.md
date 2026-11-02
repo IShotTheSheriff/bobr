@@ -12,7 +12,7 @@ work, and Vercel should deploy the tested artifact.
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Skip Next for unused utility exports | The mutation experiment checks actual Next actions and unchanged projection bytes for barrel and same-module exports.                                                                                                 |
 | Invalidate used exports and effects  | The experiment covers `add`, `sub`, unused barrel branches with effects and relative side-effect imports.                                                                                                             |
-| Ignore unreachable UI components     | Traversal starts at app imports. Unreachable files and their utility imports do not enter Next inputs. Reachable React modules remain whole files.                                                                    |
+| Ignore unreachable UI components     | Traversal starts at app imports. Unreachable files and their utility imports do not enter Next inputs. Reachable React modules remain whole files with one runtime export each.                                       |
 | Reuse nondeterministic Next output   | Bazel reuses the stored action output when projected inputs match. It never compares two independently rebuilt Next outputs to decide reuse.                                                                          |
 | Share build results                  | Normal package commands and CI use the shared-cache wrapper. Fresh clients restore Next and browser actions through the actual Caddy/bazel-remote stack with disk caching disabled. AWS provisioning remains pending. |
 | Preserve browser coverage            | Two Bazel targets test the deployment archive, covering hydration, interaction, navigation, API and 404 behavior.                                                                                                     |
@@ -71,9 +71,27 @@ Linux runners:
 | Body of `sub` only                              | Docs build, docs browser and unit tests, UI package checks | [39996498057](https://github.com/IShotTheSheriff/bobr/actions/runs/39996498057) |
 | Revert of that change                           | Nothing; 15 targets reused, no cache upload                | [39997122124](https://github.com/IShotTheSheriff/bobr/actions/runs/39997122124) |
 | Full invalidation proof with HTTP cache clients | 14 of 14 cases passed                                      | [39994990364](https://github.com/IShotTheSheriff/bobr/actions/runs/39994990364) |
+| Nx script removal, new BUILD-file check         | Only `//:build_files_test`; 14 targets reused              | [40480853937](https://github.com/IShotTheSheriff/bobr/actions/runs/40480853937) |
+| Workflow YAML fix                               | Nothing; 18 targets reused                                 | [40890601484](https://github.com/IShotTheSheriff/bobr/actions/runs/40890601484) |
+| Cache proxy notice fix                          | Only `//tools/bazel:vercel_cache_test`; 17 targets reused  | [40891010787](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010787) |
+| Docs test edit with Vercel cache on             | Docs unit test, type check and lint; 25 Vercel uploads     | [40899648722](https://github.com/IShotTheSheriff/bobr/actions/runs/40899648722) |
+| Workflow edit with Vercel cache on              | Nothing; 18 targets reused, no Vercel requests             | [40900397539](https://github.com/IShotTheSheriff/bobr/actions/runs/40900397539) |
+| One runtime export per UI file                  | Only `//tools/bazel:project_ui_test`; 17 targets reused    | [40903539740](https://github.com/IShotTheSheriff/bobr/actions/runs/40903539740) |
+| Invalidation proof with that rule               | 14 of 14 cases passed                                      | [40903539782](https://github.com/IShotTheSheriff/bobr/actions/runs/40903539782) |
 
 In the `sub` run, web's Next build, browser test, type check, lint and unit test
 all came from the cache, as did docs' type check and lint.
+
+The BUILD-file check run on 2026-10-27 also reused both production deployments,
+and each passed the 9-request live check. Locally, the check failed for
+`apps/admin`, `packages/admin-e2e` and `packages/charts` without BUILD files
+and named the file to copy for each.
+
+Since 2026-10-29 each CI run also posts a notice that says what ran. For the
+workflow fix it read "Ran 0 of 18 Next builds and checks. 18 came from cache.
+Shared Bazel cache: off." The Vercel cache proxy posts its hit, miss and upload
+counts the same way. GitHub's public API returns these notices without a login,
+so anyone can check a run without reading its logs.
 
 ## Why the artifact test matters
 
@@ -102,10 +120,11 @@ separate acceptance step.
 
 ## Cache evidence
 
-The earlier [Linux CI run](https://github.com/ernest-oneteam/bobr/actions/runs/36555048582)
-restored the cache from the previous commit and reported 267 disk-cache hits.
-That established cross-commit reuse through the GitHub Actions archive for the
-previous build graph. It did not test HTTP remote caching or Vercel artifacts.
+[Run 39994616704](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616704)
+restored the previous commit's GitHub Actions cache and reused all 15 targets.
+That shows cross-commit reuse through the Actions archive. It did not test HTTP
+remote caching or Vercel artifacts.
+[Shared cache through Vercel](#shared-cache-through-vercel) covers those.
 
 The current proof creates a local HTTP action/content cache and three independent
 Bazel output bases. The consumer has no producer output directory or disk-cache
@@ -139,8 +158,10 @@ It fails explicitly on patterns it cannot track, including computed imports,
 UI styles. Literal dynamic imports into React modules are traversed. Utilities
 require static ESM and cannot contain React/server directives.
 
-Unreachable modules are excluded, but unused exports inside a reachable React
-module can still invalidate Next. Namespace utility imports retain every export.
+Unreachable modules are excluded. A reachable React module stays whole, so the
+projection allows it one runtime export and rejects a second one with a file
+name to move it to. Type exports do not count. Namespace utility imports retain
+every export.
 Files under `app/` and `pages/`, plus `middleware`, `proxy` and
 `instrumentation` files, are conservatively roots. Other app folders count when
 a root imports them, through relative paths or tsconfig `paths`. This is a useful
@@ -148,7 +169,8 @@ bounded optimizer, not a replacement for Next's own route and React compiler
 analysis.
 
 Routine edits need no rule changes. A new app still needs a copied four-line
-BUILD file, an e2e package and a Vercel project. A new shared package gets its
+BUILD file, an e2e package and a Vercel project. `//:build_files_test` fails
+while any workspace package lacks a BUILD file. A new shared package gets its
 checks from `shared_package()`, but apps consume it as a whole package until the
 projection covers it. `pnpm dev` uses source files directly; `pnpm build` and
 `pnpm test` populate Bazel's production build and test caches.
@@ -194,14 +216,15 @@ production deployment's ID, so the reuse key changed with every production
 deploy. The key now ignores it, and the next docs edit reused both production
 deployments.
 
-Still open:
-
-- After a rollback, production reuse must compare with the deployment Vercel
-  now serves. The unit tests cover this, but no hosted run has exercised it.
-  See the check below.
-- CI uses Vercel's Remote Cache once the repository has the `VERCEL_TOKEN` and
-  `BAZEL_CACHE_SIGNING_KEY` secrets and `BAZEL_REMOTE_CACHE=vercel`. Until then
-  it reports the shared cache as off and uses the GitHub Actions cache.
+CI's build job has used Vercel's Remote Cache since 2026-10-29. It reads the
+deploy environment's `VERCEL_TOKEN` with `deployment: false`, and the
+repository secret `BAZEL_CACHE_SIGNING_KEY` turns the cache on. The first run
+with something to build was a docs test edit. It ran only the docs unit test,
+type check and lint. The proxy looked their 6 steps up in Vercel, found none
+and uploaded 25 signed files
+([40899648722](https://github.com/IShotTheSheriff/bobr/actions/runs/40899648722)).
+CI's disk cache answers first, so a commit that builds nothing sends Vercel no
+requests.
 
 ## Shared cache through Vercel
 
@@ -215,21 +238,62 @@ disk cache, built the Next apps and their tests:
 | `team-mac-2` | all restored, 0 of 4 tests run | 26 hits, 0 misses, 0 uploads  |
 
 The second client needed about 50 requests, inside the Hobby plan's 100 a
-minute. A login older than the CLI's token lifetime returned HTTP 403, so the
+minute. The same check in CI's mode used a throwaway signing key. A writer
+uploaded 27 signed files, and a fresh reader with that key restored both Next
+builds and both browser tests (18 hits, 0 misses). A reader with a different
+key ignored the 2 signed action results it found and rebuilt, so Vercel keeps
+the signature header and CI refuses results it did not sign.
+
+GitHub Actions repeated the developer path on two separate runners
+([40459620909](https://github.com/IShotTheSheriff/bobr/actions/runs/40459620909)).
+The first, with no disk cache, built the Next apps and their tests and uploaded
+60 files. The second, a fresh runner with no disk cache and no browser
+libraries, restored both Next builds, both browser tests, both type checks and
+both unit tests: 34 hits, 0 misses and 0 of 6 tests run. The workflow
+`vercel-cache.yml` repeats this when the cache code changes and every week. On
+2026-10-29 both runners found every result in Vercel, with 34 hits, 0 misses
+and 0 uploads each, and the fresh runner ran 0 of its 8 Next builds and checks
+([40891010840](https://github.com/IShotTheSheriff/bobr/actions/runs/40891010840)).
+After the docs test edit, only CI's namespace held that code's docs unit test
+and type check, because only CI had built them. The next run's first runner,
+on the developer path with no disk cache, still built nothing, with 34 hits
+and 0 misses
+([40900397649](https://github.com/IShotTheSheriff/bobr/actions/runs/40900397649)).
+A developer's Linux machine therefore reuses CI's uploads.
+
+Two Macs also shared results. A developer Mac uploaded the Next builds and test
+results through the wrapper at commit `a7e8b67`. A fresh `macos-latest` runner,
+a different Mac with no Bazel state and no disk cache, then restored all 8:
+34 hits, 0 misses and 0 of 6 tests run
+([40469246302](https://github.com/IShotTheSheriff/bobr/actions/runs/40469246302)).
+`vercel-cache-mac.yml` repeats that restore on demand. On 2026-10-29 it
+restored all 8 again from the same uploads
+([40889445293](https://github.com/IShotTheSheriff/bobr/actions/runs/40889445293)).
+
+A login older than the CLI's token lifetime returned HTTP 403, so the
 wrapper now runs `vercel whoami`, which renews the login before reading it. If
 the cache is unreachable, the wrapper builds locally instead of failing. The
 self-hosted server in `infra/bazel-cache` remains an alternative and passed its
 acceptance test on GitHub Actions
 ([39994616799](https://github.com/IShotTheSheriff/bobr/actions/runs/39994616799)).
 
-## Before calling the project complete
+## Rollback on Vercel
 
-Test production reuse after a rollback on Vercel:
+After an [Instant Rollback](https://vercel.com/docs/deployments/instant-rollback),
+Vercel keeps production on the rolled-back deployment until someone promotes a
+newer one. CI must not undo that decision. On 2026-10-27 `bobr-web` was rolled
+back from `bobr-cbgrlomjb` to the older `bobr-ks86i2lf8`, whose archive predates
+the current build.
 
-1. Roll `bobr-web` back to an earlier production deployment, for example with
-   `vercel rollback <deployment-url> --scope 0xventures`.
-2. Push a commit to `main` that leaves the web archive unchanged, such as a
-   documentation edit.
-3. The web deploy job must report "Created production deployment", not reuse:
-   the deployment Vercel now serves was not built from the tested archive.
-   The live check must pass, and production must serve the tested build again.
+| Step                            | Result                                                                                                                                     | Run                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Docs edit while rolled back     | Web created `bobr-1sm33vshp` instead of reusing, warned that production still serves the rolled-back deployment and named `vercel promote` | [40468109569](https://github.com/IShotTheSheriff/bobr/actions/runs/40468109569) |
+| `vercel promote bobr-1sm33vshp` | Production serves the tested build again                                                                                                   | local                                                                           |
+| First push after the promotion  | Web created `bobr-302phqpmt` instead of reusing `bobr-1sm33vshp`, without a warning                                                        | [40468413605](https://github.com/IShotTheSheriff/bobr/actions/runs/40468413605) |
+| Next push                       | Web reused `bobr-302phqpmt`                                                                                                                | [40468744082](https://github.com/IShotTheSheriff/bobr/actions/runs/40468744082) |
+
+The live check passed on each new deployment, and docs reused its production
+deployment throughout. A deployment created while production is rolled back is
+not reused after the promotion: the project record differs during a rollback,
+and the reuse key treats any project setting change as a reason to redeploy.
+That costs one extra deployment and never serves an untested build.

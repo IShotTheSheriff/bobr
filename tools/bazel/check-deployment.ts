@@ -1,16 +1,29 @@
 // Compare a live deployment with the tested archive it was deployed from.
 // Vercel owns routing in deployment, so this catches routes, functions and
 // static files that behave differently there than in the archive tests.
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { fork } = require("node:child_process");
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fork } from "node:child_process";
+
+interface Page {
+  status: number;
+  type: string;
+  location: string;
+  body: string;
+}
+
+interface CheckResult {
+  skipped?: string;
+  problems?: string[];
+  requests?: number;
+}
 
 const ROUTES = ["/", "/demo", "/api/hello", "/bobr-missing-page"];
 
-function serve(archive) {
+function serve(archive: string) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "bobr-deployment-"));
-  const server = fork(path.join(__dirname, "artifact-server.cjs"), [archive, temp], {
+  const server = fork(path.join(import.meta.dirname, "artifact-server.ts"), [archive, temp], {
     execPath: process.env.JS_BINARY__NODE_BINARY || process.execPath,
     execArgv: [],
     env: { PATH: process.env.PATH, HOME: temp, NODE_ENV: "production" },
@@ -19,7 +32,7 @@ function serve(archive) {
     server.kill();
     fs.rmSync(temp, { recursive: true, force: true });
   };
-  return new Promise((resolve, reject) => {
+  return new Promise<{ url: string; close: () => void }>((resolve, reject) => {
     server.once("message", (port) =>
       resolve({ url: `http://127.0.0.1:${port}`, close }),
     );
@@ -27,7 +40,7 @@ function serve(archive) {
   });
 }
 
-async function get(base, route, headers = {}) {
+async function get(base: string, route: string, headers: Record<string, string> = {}): Promise<Page> {
   const response = await fetch(new URL(route, base), {
     headers,
     redirect: "manual",
@@ -43,7 +56,7 @@ async function get(base, route, headers = {}) {
 
 // Vercel Authentication answers with a redirect to its login service, while
 // other protection modes answer 401 or 403.
-function requiresLogin({ status, location }) {
+function requiresLogin({ status, location }: Page) {
   if (status === 401 || status === 403) return true;
   if (status < 300 || status >= 400 || !location) return false;
   try {
@@ -53,10 +66,14 @@ function requiresLogin({ status, location }) {
   }
 }
 
-const title = (html) => html.match(/<title>([^<]*)<\/title>/)?.[1];
+const title = (html: string) => html.match(/<title>([^<]*)<\/title>/)?.[1];
 
-async function checkDeployment(archive, deployment, { bypass } = {}) {
-  const headers = bypass ? { "x-vercel-protection-bypass": bypass } : {};
+async function checkDeployment(
+  archive: string,
+  deployment: string,
+  { bypass }: { bypass?: string } = {},
+): Promise<CheckResult> {
+  const headers: Record<string, string> = bypass ? { "x-vercel-protection-bypass": bypass } : {};
   const first = await get(deployment, "/", headers);
   if (requiresLogin(first) && !bypass)
     return {
@@ -65,7 +82,7 @@ async function checkDeployment(archive, deployment, { bypass } = {}) {
     };
   const tested = await serve(archive);
   try {
-    const problems = [];
+    const problems: string[] = [];
     let requests = 0;
     for (const route of ROUTES) {
       const [expected, actual] = await Promise.all([
@@ -84,7 +101,7 @@ async function checkDeployment(archive, deployment, { bypass } = {}) {
     const home = await get(tested.url, "/");
     const assets = [
       ...new Set(
-        [...home.body.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map((m) => m[1]),
+        [...home.body.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map((m) => m[1]!),
       ),
     ].slice(0, 5);
     if (!assets.length) problems.push("/: the tested page references no static assets");
@@ -99,18 +116,18 @@ async function checkDeployment(archive, deployment, { bypass } = {}) {
   }
 }
 
-module.exports = checkDeployment;
-module.exports.serve = serve;
-if (require.main === module) {
+export default checkDeployment;
+export { serve };
+if (import.meta.main) {
   const [archive, deployment] = process.argv.slice(2);
-  checkDeployment(path.resolve(archive), deployment, {
+  checkDeployment(path.resolve(archive!), deployment!, {
     bypass: process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
   })
     .then(({ skipped, problems, requests }) => {
       const line = skipped
         ? `Skipped the deployment check: ${skipped}`
-        : problems.length
-          ? `The deployment differs from the tested archive:\n${problems.join("\n")}`
+        : problems!.length
+          ? `The deployment differs from the tested archive:\n${problems!.join("\n")}`
           : `The deployment matches the tested archive on ${requests} requests.`;
       console.log(skipped ? `::notice::${line}` : line);
       if (process.env.GITHUB_STEP_SUMMARY)
