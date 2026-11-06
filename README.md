@@ -1,251 +1,203 @@
-# Bóbr
+# Bóbr, byakugan branch
 
 Bóbr tests whether a TypeScript monorepo can skip work when shared code changes
-without affecting an app. Bazel owns cache keys. Developers write ordinary
-imports, including imports through a barrel.
+without affecting an app. On this branch [byakugan](https://github.com/IShotTheSheriff/byakugan)
+computes the cache keys. `main` holds the same proof of concept on Bazel.
+Developers write ordinary imports, including imports through a barrel.
 
 ## Development and CI
 
 ```bash
 pnpm install
-pnpm dev                     # Next dev servers use the original sources
-pnpm build                   # Bazel builds both Vercel artifacts
-pnpm test                    # Every check, each rerun only when its inputs change
-pnpm e2e:test                # Just the artifact browser tests
-pnpm test:bazel-next          # Disposable mutation and remote-cache experiment
+pnpm dev          # Next dev servers use the original sources
+pnpm build        # Both Vercel archives, reused when their key is stored
+pnpm test         # Every check, each rerun only when its key changes
+pnpm e2e:test     # Just the browser tests against the archives
+pnpm test:proof   # Disposable edits that prove what reruns
 ```
 
-`pnpm test` runs these checks as Bazel tests:
+`pnpm test` runs `tools/ci/run.ts`, which finds these tasks:
 
-| Check         | Example target                   | What it reads                                   |
-| ------------- | -------------------------------- | ----------------------------------------------- |
-| Type check    | `//apps/web:typecheck`           | App files and the shared types the app reaches  |
-| Lint          | `//apps/web:lint`                | App files and the ESLint config                 |
-| Unit test     | `//apps/web:lib/calculator.test` | One esbuild bundle of the code the test reaches |
-| Browser test  | `//packages/web-e2e:test`        | The Vercel deployment archive                   |
-| Library tests | `//packages/ui:typecheck`, ...   | The shared UI package's own sources             |
+| Check         | Example task                      | What its key covers                                                  |
+| ------------- | --------------------------------- | -------------------------------------------------------------------- |
+| Next build    | `build:web`                       | The code the app's entries reach, its Vercel settings and Vercel CLI |
+| Browser test  | `browser:web`                     | The build's key and the Playwright suite                             |
+| Type check    | `typecheck:web`                   | Every code file in the package and the code those files reach        |
+| Lint          | `lint:web`                        | The package's own files and its ESLint config                        |
+| Unit test     | `unit:web/lib/calculator.test.ts` | The code the test file reaches                                       |
 
-Install Bazelisk before using the Bazel commands. The browser targets support
-Linux x64 and macOS arm64. Linux also needs Chromium's system libraries, which
-CI installs with the pinned Playwright CLI. Locally, run
-`pnpm --filter @repo/web-e2e exec playwright install-deps chromium`.
-Bazel downloads the pinned browser. After updating Playwright, run
-`node scripts/update-chromium.ts` to generate its version and archive hashes.
+Every key also covers the operating system, CPU, Node major, byakugan's version
+and the scripts in `tools/ci` that run that kind of task. Before the browser
+tests run for the first time, install Chromium with
+`pnpm --filter @repo/web-e2e exec playwright install chromium`.
 
-`pnpm build`, `pnpm test` and CI use `scripts/bazel.py`. If you are logged into
-the Vercel CLI, it shares Next builds and test results with your teammates
-through the team's Vercel Remote Cache. Run `vercel login` once; set
-`BAZEL_REMOTE_CACHE=off` to build without it. See
-[the setup guide](spec/BAZEL_DEPLOYMENT.md#configure-the-shared-cache).
-`pnpm dev` does not populate production build cache entries. Run `pnpm build` or
-`pnpm test` to do that.
+Stored archives and results live in `.cache/ci`. CI keeps that directory in the
+GitHub Actions cache, and pull requests read the entries `main` saved. There is
+no cache shared between developers. `main` shares Bazel's through Vercel's
+Remote Cache.
+
+CI writes a table to each run's summary page. It lists every task and whether
+it ran or came from cache.
 
 ## What developers edit
 
-Code and `package.json`. Bazel reads everything else from the files:
+Code and `package.json`. There are no build files:
 
-- New pages, routes, folders, components and utilities need no BUILD change.
-- Every `*.test.ts` or `*.test.tsx` file becomes a cached test target.
+- New pages, routes, folders, components and utilities need no change.
+- Every `*.test.ts` or `*.test.tsx` file becomes its own unit test task.
 - npm dependencies come from `pnpm-lock.yaml` after `pnpm install`.
-- tsconfig `paths` aliases such as `@/*` resolve the way TypeScript resolves them.
-- Nobody calculates or commits a hash. Bazel derives every key from file contents.
+- Nobody calculates or commits a hash. byakugan derives every key from the code.
 
-Each app's `BUILD.bazel` is four lines that call `next_app()`. A shared package
-calls `shared_package()`. A new app copies `apps/web/BUILD.bazel` and an e2e
-package, and it needs its own Vercel project. If a package under `apps/` or
-`packages/` has no `BUILD.bazel`, `//:build_files_test` fails and names the file
-to copy. Without that check Bazel would skip the package and CI would still pass.
+`tools/ci/tasks.ts` reads the packages from `pnpm-workspace.yaml`. A package
+that depends on `next` and has a `next.config` is an app. A package that
+depends on `@playwright/test` and on an app is that app's browser suite. A new
+app needs a `vercel-build.json`, a `byakugan.json`, a browser suite and its own
+Vercel project.
 
-CI writes a table to each run's summary page that lists the Next builds and
-checks that ran, and the ones Bazel reused from cache.
+## How a key is made
 
-## The build boundary
+byakugan builds the graph of code a set of entry files uses. It follows imports
+into workspace packages and npm packages, down to single exports inside barrel
+files, and hashes the declarations it reaches. `tools/ci/tasks.ts` gives each
+kind of task its own entries:
 
-```text
-App entries + the workspace packages in its dependencies
-             |
-   Projection and TypesProjection (tools/bazel/projection.ts)
-             |                              \
-  node_modules/.projection/runtime     node_modules/.projection/types
-             |                              |
-  NextBuild, vercel build --standalone      app type check
-             |
-        vercel_output.tar
-                    |
-           Playwright artifact tests
-                    |
-           vercel deploy --prebuilt
-```
+- A build starts at the files Next compiles by convention: App Router and
+  Pages files, `middleware`, `proxy`, `instrumentation` and `next.config`. The
+  app's `byakugan.json` adds `vercel-build.json` and the installed Vercel CLI.
+- A type check starts at every code file in the package, because `tsc` reads
+  every file its `tsconfig.json` includes, reached or not.
+- A lint hashes the package's own files whole and starts at its ESLint
+  config, so the shared ESLint config counts and the code the files import
+  does not.
+- A unit test starts at its test file.
 
-`Projection` starts at the files Next compiles by convention: App Router and
-Pages files for the app's `pageExtensions`, `middleware`, `proxy`,
-`instrumentation` and `next.config`. It follows imports into every workspace
-package in the app's `dependencies` and into the workspace packages those
-depend on. Resolution follows `exports` and `imports` with their conditions,
-wildcards and null targets, tsconfig `paths`, and `.js` specifiers that point
-at `.ts` files.
+Every graph also holds the `tsconfig.json` chain, `package.json` and `.env*`
+files, and the installed versions of tools such as `next`, `typescript` and
+`tailwindcss`. A graph that reaches a Tailwind stylesheet holds the CSS
+Tailwind generates for it. Keys use paths relative to the repository, so a
+second clone at another path reuses the same results.
 
-Every module keeps its path and its text. A file Next must compile as a whole is
-copied byte for byte: JSX, a `"use client"` or `"use server"` directive,
-CommonJS, styles and assets. Other modules lose the top-level statements that no
-used export reaches and that cannot run code. They also lose comments and
-indentation, so a comment edit inside a used function changes nothing. An unused
-import of a module that the package's `sideEffects` field marks as free of
-effects disappears, as Turbopack drops it. Other unused imports stay as a bare
-`import "x"`. An initializer that can run code stays unless `/*#__PURE__*/`
-marks it.
-
-Styles follow `@import`, `@use`, `url()` and CSS modules' `composes`. A
-directory Tailwind scans through `@source`, `source()` or a Tailwind 3 `content`
-glob is copied whole, because its files must match the source byte for byte.
-
-The Next build copies the projected packages to their own directories, such as
-`packages/ui`, and links them from the app's `node_modules` as pnpm does.
-Modules resolve, and Next names them, exactly as in a build of the whole
-repository. `next.config.js` needs no alias.
-
-`TypesProjection` builds the type checker's view the same way, type-only imports
-included. A module TypeScript can emit declarations for becomes those
-declarations, cut down to the names the app uses. A body change in a shared
-utility leaves every app's type check cached. A signature change reruns only the
-apps that import that utility. Components stay whole.
-
-Some code names its files at runtime: `import(name)` or `require(name)` with no
-static prefix, `fs` reads, `import.meta.url`, `__dirname` and a computed
-`require.resolve`. The projection then copies the module's directory, or the
-whole package for a computed import, and writes a line to its report,
-`node_modules/.projection/<mode>.json` next to the tree. Next never reads the
-report, and CI's run summary prints it for each app. `--define=projection=strict`
-turns every fallback into an error.
-
-An unused export edit reruns the projection. If it produces identical files,
-Bazel reuses the existing Next and Vercel output and cached browser test result.
-Next's output can be nondeterministic because no second Next build executes on
-that cache hit. No output normalization or developer-maintained semantic hashes
-control this decision.
-
-The projection is a model of what Next reads, so it has an oracle.
-`//apps/web:equivalence_test` builds the app once more, against every workspace
-package whole, and compares that archive with the projected build's. Turbopack
-names chunks by their content and modules by their path under the build root,
-so the comparison replaces only sandbox paths and the secrets Next generates
-for every build. A difference means the projection dropped something Next
-reads, such as a Tailwind class. The test is manual. CI runs it weekly and
-whenever the build setup changes:
-
-```bash
-bazel test //apps/web:equivalence_test //apps/docs:equivalence_test
-```
-
-The tests run the generated Vercel function handlers and static files from an
-isolated copy. They check hydration, calculator updates, navigation, API calls
-and 404 responses. The local adapter implements this PoC's routes; a hosted
-preview still needs validation against Vercel's routing and environment.
+byakugan runs on worker threads, one graph per task. For the 15 tasks here it
+takes about 2.5 seconds on an Apple Silicon Mac.
 
 ## What reruns
 
-Each row is one edit, measured with Bazel's execution log after a full cached
-run.
+Each row is one edit. `scripts/prove-invalidation.ts` checks every row, and
+the right column shows what `main` reruns with Bazel.
 
-| Edit                                      | Web                                    | Docs                                      |
-| ----------------------------------------- | -------------------------------------- | ----------------------------------------- |
-| Body of `sub`, which only docs uses       | nothing                                | build, browser and unit tests             |
-| Body of `add`, which only web uses        | build, browser and unit tests          | nothing                                   |
-| Signature of `sub`                        | nothing                                | build, browser and unit tests, type check |
-| Comment inside a used shared function     | nothing                                | nothing                                   |
-| New utility module that no app imports    | nothing                                | nothing                                   |
-| UI component that no app renders          | nothing                                | nothing                                   |
-| UI component that only web renders        | build, browser tests, type check       | nothing                                   |
-| Second export added to that web component | build, browser tests, type check       | nothing                                   |
-| New npm dependency used by docs           | nothing                                | build, browser tests, type check, lint    |
-| New folder and component in web           | build, browser tests, type check, lint | nothing                                   |
-| App README                                | nothing                                | nothing                                   |
-| Shared ESLint rule                        | lint                                   | lint                                      |
-| Shared tsconfig                           | everything                             | everything                                |
+| Edit                                      | Reruns on this branch                                     | Reruns with Bazel on `main`                     |
+| ----------------------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
+| Body of `sub`, which only docs uses       | docs build, browser, type check and unit tests            | docs build, browser and unit tests              |
+| Body of `add`, which only web uses        | web build, browser, type check and unit tests             | web build, browser and unit tests               |
+| Comment inside a used shared function     | web build, browser, type check and unit tests             | nothing                                         |
+| New utility module that no app imports    | nothing                                                   | nothing                                         |
+| UI component that no app renders          | nothing                                                   | nothing                                         |
+| Unused export in a used module            | nothing                                                   | nothing                                         |
+| Unused export in a component web renders  | nothing                                                   | web build, browser tests, type check            |
+| New npm dependency used by docs           | docs build, browser tests, type check, lint               | docs build, browser tests, type check, lint     |
+| New folder and component in web           | web build, browser tests, type check, lint                | web build, browser tests, type check, lint      |
+| App README                                | nothing                                                   | nothing                                         |
+| Shared ESLint rule                        | lint of every package                                     | lint of every package                           |
+| Shared tsconfig                           | everything                                                | everything                                      |
 
 Any edit to `packages/ui` also reruns that package's own type check and lint.
-Unit tests in `packages/ui` rerun only when the module they test changes.
-GitHub Actions runs on fresh Linux runners showed the same result; the
-[evaluation](spec/BAZEL_EVALUATION.md#verification-on-2026-10-23) links them.
+A unit test in `packages/ui` reruns only when the code it reaches changes.
+
+Three rows differ from Bazel. byakugan hashes a declaration's text, comments
+included, so a comment inside a used function rebuilds the app. The proof's
+oracle shows that the rebuilt archive is identical, so that build was wasted.
+A type check reruns when the body of a function it reaches changes, where
+Bazel compiles against declarations and reruns only on a signature change.
+In the other direction, byakugan splits a component file into declarations,
+so a new export next to a used component changes nothing. Bazel keeps files
+with JSX whole and rebuilds.
+
+## The oracle
+
+A key is a model of what a task reads. Bazel enforces its model with a
+sandbox, so a build cannot read a file outside its inputs. byakugan has no
+sandbox. If it misses an input, CI reuses a stale archive and nothing fails.
+
+Turbopack names chunks by their content and modules by their path, so two
+builds of the same tree produce the same archive apart from secrets Next
+generates for every build. `tools/ci/compare-archives.ts` replaces those
+secrets and compares two archives file by file. That gives the model an
+oracle:
+
+- `node tools/ci/run.ts test --verify` builds every app whose archive comes
+  from cache again and fails if the two archives differ. CI does this on
+  every push, so a missed input shows up on the next commit that reuses the
+  archive. Pull requests skip the extra builds.
+- The proof runs the same comparison after every edit.
 
 ## Prove invalidation
 
 ```bash
-# No pnpm install required; Bazel supplies the build tools.
-python3 scripts/prove-next-invalidation.py --remote --browser
+pnpm test:proof                                # node scripts/prove-invalidation.ts --browser
+node scripts/prove-invalidation.ts --keys-only   # keys only, no builds, about a minute
 ```
 
-The proof changes only a disposable copy of the working tree. It checks actual
-`NextBuild` and `TestRunner` actions, compares complete intermediate and output
-trees and deployment archive bytes, and saves JSON evidence with execution logs.
+The proof copies the working tree to a temporary directory and makes the
+edits below one after another. After each edit it runs every task, checks
+which ones ran, and builds every reused app again for the oracle. It saves
+logs and `results.json` with every task that ran.
 
-| Edit                                                | Web build and browser tests | Docs build and browser tests |
-| --------------------------------------------------- | --------------------------- | ---------------------------- |
-| Add or change an unreachable UI component           | Reused                      | Reused                       |
-| Change an unused export through the utility barrel  | Reused                      | Reused                       |
-| Change an unused export in the same module as `add` | Reused                      | Reused                       |
-| Change used `add`                                   | Execute                     | Reused                       |
-| Change used `sub`                                   | Reused                      | Execute                      |
-| Add an effect to a module no app imports            | Reused                      | Reused                       |
-| Add or change an effect in `add`'s module           | Execute                     | Reused                       |
-| Change an effect behind a bare `import "./utils"`   | Reused                      | Reused                       |
-| The same after removing `sideEffects` from the UI   | Execute                     | Execute                      |
-| Start a fresh client with only HTTP cache access    | Cache hit                   | Cache hit                    |
-| Edit an unused export on another fresh client       | Cache hit                   | Cache hit                    |
+| Edit                                                   | Web build            | Docs build           |
+| ------------------------------------------------------ | -------------------- | -------------------- |
+| Add or change an unreachable UI component              | Reused               | Reused               |
+| Change an unused export through the utility barrel     | Reused               | Reused               |
+| Add an unused export next to `add`                     | Reused               | Reused               |
+| Add an unused export next to the `Code` component      | Reused               | Reused               |
+| Change used `add`                                      | Rebuilt              | Reused               |
+| Change used `sub`                                      | Reused               | Rebuilt              |
+| Add a comment inside used `add`                        | Rebuilt, same output | Reused               |
+| Add an effect to a module no app imports               | Reused               | Reused               |
+| Add or change an effect in `add`'s module              | Rebuilt              | Reused               |
+| Add a component and folder to web                      | Rebuilt              | Reused               |
+| Add an npm dependency that docs uses                   | Reused               | Rebuilt              |
+| Change the shared tsconfig                             | Rebuilt, same output | Rebuilt, same output |
+| Change an effect behind a bare `import "./utils"`      | Reused               | Reused               |
+| The same after removing `sideEffects` from the UI      | Rebuilt              | Rebuilt              |
+| A second clone at another path, sharing only the cache | Reused               | Reused               |
 
+Every "Reused" also means that a fresh build matched the stored archive.
+"Same output" means the oracle found the rebuilt archive identical to the one
+before the edit, so the build was not needed. The tsconfig edit turns on
+`noImplicitOverride`, which changes no emitted code. A key cannot know that.
 `@repo/ui` declares `"sideEffects": false`, so Turbopack drops a module whose
-exports nobody uses, effects included. The two reused effect rows also run the
-equivalence check, which shows that a build of the whole package drops the
-effect too.
+exports nobody uses, effects included. byakugan skips such a module too, and
+the oracle shows that Next agrees. When an effect does run, the proof checks
+that its string reaches the browser chunks.
 
-The HTTP fixture uses separate producer and consumer Bazel output bases, no
-disk cache, and a consumer that cannot upload results. This tests the remote
-cache protocol locally. It does not establish access to a hosted cache provider.
-The expensive experiment runs for build-system changes, weekly, or manually.
-Follow-up PR commits compare against the previous head so ordinary app edits
-can skip the experiment.
+CI runs the proof when the build setup changes, weekly, and on request.
 
 ## Deployment and limits
 
-See [the setup guide](spec/BAZEL_DEPLOYMENT.md) for the shared cache, Vercel
-account and GitHub configuration. CI packages the tested Linux artifact and
-deploys it without another build: previews from branches and PRs, production
-from `main`. An app whose archive did not change keeps its existing deployment,
-so a shared-code change that only docs uses deploys only docs.
+See [the setup guide](spec/DEPLOYMENT.md) for the Vercel account and GitHub
+configuration. CI packages the tested Linux archive and deploys it without
+another build: previews from branches and PRs, production from `main`. An app
+whose archive did not change keeps its existing deployment, so a shared-code
+change that only docs uses deploys only docs.
 
-The selected shared cache is self-hosted on AWS. Its
-[EC2 and Docker setup](infra/bazel-cache/README.md) includes automatic HTTPS,
-separate reader/writer credentials and an acceptance test using fresh clients.
-AWS provisioning still needs an account and cache domain. Until then, CI keeps
-Bazel's disk cache in the GitHub Actions cache, which pull requests read from
-`main`.
+byakugan is not on npm yet, so `vendor/byakugan-cli-0.1.0.tgz` holds the
+package, built from byakugan's `main`. Replace it with an npm version once one
+is published.
 
-This remains a bounded PoC. Files with JSX, directives or CommonJS stay whole,
-so any edit to a component file rebuilds every app that renders it. Namespace
-imports keep every export. Code that finds files at runtime costs its directory
-or package, and the report lists each case. A new shared workspace package gets
-checks from `shared_package()`, and every app that lists it in `dependencies`
-gets its projection. Workspace packages in `devDependencies`, such as the
-ESLint and TypeScript configs, stay whole. `.env` files in an app are build
-inputs. Values from the CI environment or the network are not, so declare them
-before an app reads them.
+Without a sandbox, the keys cover only what byakugan can see. Environment
+variables that CI sets, data a build fetches and files code reads through a
+computed path are not in any key. byakugan prints a warning for computed
+imports and paths. List such files under `inputs` in the package's
+`byakugan.json`, and add environment variables to the key before an app reads
+them. byakugan also assumes that top-level initializers such as
+`export const store = createStore()` have no effects. Its
+[README](https://github.com/IShotTheSheriff/byakugan#limits) lists the rest.
 
-The Next build uses Turbopack. Bazel's sandbox gives an action its inputs as
-absolute symlinks into the execroot, and Turbopack refuses a symlink that
-points outside its root: `Symlink [project]/apps/web/package.json is invalid,
-it points out of the filesystem root`. Before the build,
-`tools/bazel/materialize-inputs.ts` replaces those links with the files
-themselves, as clones where the file system supports them, such as APFS, and
-as hard links elsewhere. rules_js patches
-Node's `fs` so that these links look like regular files, so the script runs in
-a child process with the patch off. On macOS the step takes about 5 seconds
-for the 23,000 files of a Next build's inputs. Remote execution workers
-usually give an action regular files, so there the step should find nothing to
-replace. bobr has not tested remote execution. A build with
-`next build --webpack` skips the step, but the equivalence check would then
-need module ids that do not depend on the sandbox path.
+The builds run in the checkout itself, not in a copy. Next writes `.next` and
+`next-env.d.ts` into the app, and the type check's key leaves out
+`next-env.d.ts` for that reason. A Next build of either app here takes 2 to 3
+seconds on a Mac. The Bazel version spends about 5 more seconds replacing the
+sandbox's symlinks for Turbopack.
 
-See [the evaluation](spec/BAZEL_EVALUATION.md) for evidence and remaining gaps.
-[The migration notes](spec/BAZEL_MIGRATION.md) describe the original graph.
+[The deployment guide](spec/DEPLOYMENT.md) covers Vercel.
 [The optimization plan](spec/OPTIMIZATION_PLAN.md) and
 [hashing strategy](spec/HASHING_STRATEGY.md) record the earlier Nx approach.

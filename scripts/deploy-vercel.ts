@@ -1,4 +1,4 @@
-// Deploy the archive already built and tested by Bazel.
+// Deploy the archive already built and tested in CI.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +14,7 @@ import {
   type VercelEnvironment,
   type VercelProject,
 } from "./vercel-reuse.ts";
-import checkArtifact from "../tools/bazel/check-artifact.ts";
+import checkArtifact from "../tools/ci/check-artifact.ts";
 
 const require = createRequire(import.meta.url);
 

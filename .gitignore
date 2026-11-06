@@ -43,12 +43,6 @@ yarn-error.log*
 .DS_Store
 *.pem
 
-# Bazel (bazel-out, bazel-bin, bazel-testlogs, bazel-<workspace> convenience symlinks)
-/bazel-*
-.bazel-cache
-# Remote-cache credentials, loaded via `try-import` in .bazelrc — never commit.
-# (The .bazelrc.auth.example template IS committed.)
-.bazelrc.auth
 
 .claude/worktrees
 .nx/polygraph
@@ -56,3 +50,10 @@ yarn-error.log*
 
 # Python test imports
 __pycache__/
+# Bazel outputs left by the main branch
+/bazel-*
+.bazel-cache
+
+# Stored archives and results, and the archives CI deploys
+/.cache
+/artifacts

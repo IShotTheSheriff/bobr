@@ -1,0 +1,4 @@
+{
+  "inputs": ["vercel-build.json"],
+  "packages": ["vercel"]
+}

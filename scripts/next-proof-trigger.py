@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide whether this push needs the expensive Next invalidation experiment."""
+"""Decide whether this push needs the expensive invalidation proof."""
 import fnmatch
 import json
 import os
@@ -8,18 +8,14 @@ import subprocess
 
 PATTERNS = (
     ".github/workflows/*",
-    "tools/bazel/*",
-    "scripts/*next*proof*",
-    "scripts/prove-next-invalidation.py",
-    "scripts/http_cache_fixture.py",
-    "scripts/bazel.py",
+    "tools/ci/*",
+    "scripts/prove-invalidation.ts",
+    "scripts/next-proof-trigger.py",
+    "vendor/*",
+    "apps/*/byakugan.json",
     "apps/*/vercel-build.json",
     "packages/*-e2e/*",
-    "MODULE.bazel*",
-    ".bazel*",
     ".nvmrc",
-    "BUILD.bazel",
-    "*/BUILD.bazel",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "package.json",
@@ -60,7 +56,7 @@ def main():
     result = needs_proof(os.environ["GITHUB_EVENT_NAME"], event, changed_files)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
         output.write(f"required={str(result).lower()}\n")
-    print(f"Run Next invalidation proof: {result}")
+    print(f"Run the invalidation proof: {result}")
 
 
 if __name__ == "__main__":

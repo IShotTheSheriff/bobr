@@ -20,12 +20,12 @@ class ProofTriggerTest(unittest.TestCase):
         event = {"pull_request": {"base": {"sha": "main"}, "head": {"sha": "head"}}}
         def files(before, after):
             self.assertEqual((before, after), ("main", "head"))
-            return ["tools/bazel/projection.ts"]
+            return ["tools/ci/tasks.ts"]
         self.assertTrue(trigger.needs_proof("pull_request", event, files))
 
     def test_build_inputs_trigger_proof(self):
         event = {"before": "old", "after": "new"}
-        for name in [".nvmrc", "package.json", "apps/web/BUILD.bazel", "pnpm-lock.yaml", "tools/bazel/projection.ts", "scripts/prove-next-invalidation.py", "scripts/next-proof-trigger.py"]:
+        for name in [".nvmrc", "package.json", "apps/web/byakugan.json", "pnpm-lock.yaml", "tools/ci/tasks.ts", "vendor/byakugan-cli-0.1.0.tgz", "scripts/prove-invalidation.ts", "scripts/next-proof-trigger.py"]:
             with self.subTest(name=name):
                 self.assertTrue(trigger.needs_proof("push", event, lambda *_: [name]))
 

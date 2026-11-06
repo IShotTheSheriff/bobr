@@ -1,8 +1,8 @@
-name: CI (Bazel)
+name: CI (byakugan)
 
 on:
   push:
-    branches: ["main", "bazel"]
+    branches: ["main", "byakugan"]
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -10,172 +10,101 @@ permissions:
   contents: read
 
 jobs:
-  bazel:
-    name: Build & test (Bazel)
+  test:
+    name: Build & test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
-      group: bazel-${{ github.workflow }}-${{ github.ref }}
+      group: test-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
-    # The deploy jobs' environment holds the Vercel token. The build job reads it
-    # from there for the shared cache, without recording a deployment.
-    environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
-      deployment: false
     env:
-      # The signing key exists only for Vercel's cache, so it turns that cache on.
-      # A BAZEL_REMOTE_CACHE variable overrides it with another cache or "off".
-      BAZEL_REMOTE_CACHE: ${{ vars.BAZEL_REMOTE_CACHE || (secrets.BAZEL_CACHE_SIGNING_KEY != '' && 'vercel' || '') }}
-      # Only trusted pushes get writer credentials. PRs require a backend-enforced
-      # read-only credential; fork PRs receive no secrets from GitHub.
-      BAZEL_REMOTE_HEADER: ${{ github.event_name == 'push' && secrets.BAZEL_REMOTE_WRITE_HEADER || secrets.BAZEL_REMOTE_READ_HEADER }}
-      BAZEL_REMOTE_UPLOAD: ${{ github.event_name == 'push' && '1' || '0' }}
-      # Vercel's Remote Cache. CI signs the action results it writes and ignores
-      # unsigned ones, so developer uploads never reach a CI build.
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      BAZEL_CACHE_SIGNING_KEY: ${{ secrets.BAZEL_CACHE_SIGNING_KEY }}
       DEPLOY_TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
     steps:
       - uses: actions/checkout@v7
-      - name: Check CI helper behavior
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-      - name: Check deployment reuse behavior
-        run: node --test scripts/test_vercel_reuse.ts
-      - name: Install Bazelisk
-        run: npm install -g @bazel/bazelisk
-      # Only browser tests that actually execute need these libraries, and the
-      # runner image already ships most of them for its preinstalled Chrome.
-      # Install in the background so a slow package mirror never blocks a run
-      # whose browser results come from cache.
-      - name: Start installing browser system libraries
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check CI helper behavior
         run: |
-          (npx --yes playwright@1.61.0 install-deps chromium > "$RUNNER_TEMP/browser-deps.log" 2>&1
-           echo $? > "$RUNNER_TEMP/browser-deps.status") &
-      - name: Configure cache access
-        env:
-          PUBLIC_CACHE: ${{ vars.BAZEL_REMOTE_PUBLIC_READ }}
-        run: |
-          ready=""
-          missing=""
-          if [ "$BAZEL_REMOTE_CACHE" = vercel ]; then
-            [ -n "$VERCEL_TOKEN" ] || missing="$missing VERCEL_TOKEN"
-            [ -n "$BAZEL_CACHE_SIGNING_KEY" ] || missing="$missing BAZEL_CACHE_SIGNING_KEY"
-            [ -n "$missing" ] || ready=1
-          elif [ -n "$BAZEL_REMOTE_CACHE" ]; then
-            if [ -n "$BAZEL_REMOTE_HEADER" ] || [ "$PUBLIC_CACHE" = 1 ]; then ready=1; fi
-          fi
-          # An explicit "off" also stops the wrapper from detecting a Vercel login.
-          if [ -z "$ready" ]; then
-            echo 'BAZEL_REMOTE_CACHE=off' >> "$GITHUB_ENV"
-            echo "Shared Bazel cache: off. CI uses its GitHub Actions cache." >> "$GITHUB_STEP_SUMMARY"
-            # This job sees the repository's settings and those of its environment,
-            # so one saved in another environment or on the wrong tab looks missing.
-            # The warning names it without its value. Fork pull requests get no
-            # secrets, so only pushes warn.
-            if [ "$GITHUB_EVENT_NAME" = push ]; then
-              if [ -n "$missing" ]; then
-                echo "::warning title=Shared Bazel cache::The shared cache is set to Vercel, but CI can't see these secrets in the repository or the $DEPLOY_TARGET environment:$missing."
-              elif [ "$BAZEL_REMOTE_CACHE" != off ] && [ -n "$BAZEL_CACHE_SIGNING_KEY" ]; then
-                echo "::warning title=Shared Bazel cache::BAZEL_CACHE_SIGNING_KEY is set, but the variable BAZEL_REMOTE_CACHE is neither vercel nor off."
-              fi
-            fi
-          else
-            echo "Shared Bazel cache: $BAZEL_REMOTE_CACHE." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Restore Bazel disk and downloads
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          node --test scripts/test_vercel_reuse.ts tools/ci/check-deployment.test.ts
+      # One cache entry holds every stored archive and test result. A run
+      # restores the newest entry, and pull requests read the ones main saved.
+      - name: Restore stored results
         id: cache
         uses: actions/cache/restore@v6
         with:
-          path: |
-            .bazel-cache
-            ~/.bazel-repo
-          key: bazel-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel.lock', 'pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/ci
+          key: ci-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel.lock', 'pnpm-lock.yaml') }}-
-            bazel-${{ runner.os }}-${{ runner.arch }}-
-            bazel-${{ runner.os }}-
-      - name: Note the restored cache entries
+            ci-${{ runner.os }}-${{ runner.arch }}-
+      - name: Note the restored entries
         run: |
-          mkdir -p .bazel-cache
-          find .bazel-cache -type f | wc -l > "$RUNNER_TEMP/cache-entries"
-      - name: Build, then run checks that need no browser
-        run: python3 scripts/bazel.py test //... --test_tag_filters=-browser --repository_cache="$HOME/.bazel-repo" --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/checks.exec.json"
-      # Bazel never caches a failed test, so a retry after the libraries arrive
-      # runs the browser tests again. A real failure still fails the retry.
-      - name: Run browser tests against the deployment archives
-        run: |
-          test_browser() {
-            python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" \
-              --define="deploy_env=$DEPLOY_TARGET" --execution_log_json_file="$RUNNER_TEMP/browser-$1.exec.json"
-          }
-          test_browser first && exit 0
-          echo "::notice::Retrying browser tests after their system libraries finish installing."
-          while [ ! -f "$RUNNER_TEMP/browser-deps.status" ]; do sleep 2; done
-          tail -n 3 "$RUNNER_TEMP/browser-deps.log"
-          [ "$(cat "$RUNNER_TEMP/browser-deps.status")" = 0 ] || exit 1
-          test_browser retry
-      - name: Summarize what ran and what came from cache
-        if: always()
-        run: python3 scripts/ci-summary.py "$RUNNER_TEMP"/checks.exec.json "$RUNNER_TEMP"/browser-*.exec.json
-      - name: Package the tested artifacts
-        run: |
-          mkdir -p artifacts
-          for app in web docs; do
-            cp "bazel-bin/apps/$app/vercel_output.tar" "artifacts/$app.tar"
-          done
+          mkdir -p .cache/ci
+          find .cache/ci -type f | wc -l > "$RUNNER_TEMP/cache-entries"
+      - name: Plan
+        id: plan
+        run: node tools/ci/run.ts test --plan
+      # Only browser tests that run need Chromium and its system libraries.
+      - name: Install Chromium
+        if: steps.plan.outputs.browser == 'true'
+        run: pnpm --filter @repo/web-e2e exec playwright install --with-deps chromium
+      # On pushes, every archive that comes from cache is built again and
+      # compared, so a key that misses a change fails the run. Pull requests
+      # skip the extra builds.
+      - name: Build and test
+        run: node tools/ci/run.ts test --out artifacts ${{ github.event_name == 'push' && '--verify' || '' }}
       - uses: actions/upload-artifact@v7
         with:
           name: vercel-output
           path: artifacts/*.tar
           retention-days: 7
-      # Production and preview have separate action keys. Warm preview only after
-      # archiving production so deployment still receives the tested production output.
-      - name: Populate preview cache from trusted main
+      # Production and preview builds have separate keys. Main builds preview
+      # too, after archiving production, so pull requests can reuse it.
+      - name: Store preview builds from trusted main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: python3 scripts/bazel.py test //... --repository_cache="$HOME/.bazel-repo" --define=deploy_env=preview
+        run: node tools/ci/run.ts build --target preview
       # Every save uploads the whole cache and counts against the repository's
-      # cache quota. Skip the upload when Bazel stored nothing new, and drop
-      # entries no run has read for a week. Bazel refreshes an entry's timestamp
-      # when it reads it, and the cache archive keeps those timestamps.
-      - name: Drop cache entries unused for a week
+      # cache quota. Skip the upload when nothing new was stored, and drop
+      # entries no run has read for a week. The runner refreshes an entry's
+      # time when it reuses it.
+      - name: Drop entries unused for a week
         id: trim
         run: |
           before=$(cat "$RUNNER_TEMP/cache-entries")
-          after=$(find .bazel-cache -type f | wc -l)
+          after=$(find .cache/ci -type f | wc -l)
           if [ "$after" -gt "$before" ]; then
-            find .bazel-cache -type f -mtime +7 -delete
+            find .cache/ci -type f -mtime +7 -delete
             echo "save=true" >> "$GITHUB_OUTPUT"
           fi
-          kept=$(find .bazel-cache -type f | wc -l)
+          kept=$(find .cache/ci -type f | wc -l)
           echo "Cache entries: $before restored, $((after - before)) new, $kept kept." >> "$GITHUB_STEP_SUMMARY"
-      - name: Save the build cache
+      - name: Save stored results
         if: steps.trim.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
-          path: |
-            .bazel-cache
-            ~/.bazel-repo
+          path: .cache/ci
           key: ${{ steps.cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: browser-test-evidence
-          path: bazel-testlogs/packages/*-e2e/test/
+          path: packages/*-e2e/test-results/
           if-no-files-found: ignore
 
   deploy:
     name: Deploy tested ${{ matrix.app }} artifact
-    needs: [bazel]
-    # Fork PRs never receive deployment credentials. The bazel branch preview
+    needs: [test]
+    # Fork PRs never receive deployment credentials. The byakugan branch preview
     # deploys on push to avoid duplicates. Whether deployment is configured is
     # checked inside the job, where environment settings are visible.
     if: >-
       github.event_name == 'push' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
-       github.head_ref != 'bazel')
+       github.head_ref != 'byakugan')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -264,4 +193,4 @@ jobs:
           APP: ${{ matrix.app }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets[format('VERCEL_{0}_BYPASS_SECRET', matrix.app == 'web' && 'WEB' || 'DOCS')] }}
-        run: node tools/bazel/check-deployment.ts "artifacts/$APP.tar" "$DEPLOYMENT_URL"
+        run: node tools/ci/check-deployment.ts "artifacts/$APP.tar" "$DEPLOYMENT_URL"
