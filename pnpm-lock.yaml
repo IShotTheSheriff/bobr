@@ -4389,7 +4389,7 @@ packages:
     engines: {node: '>=18'}
 
   byakugan-cli@file:vendor/byakugan-cli-0.1.0.tgz:
-    resolution: {integrity: sha512-o2A1gzSeOQdJLe6D5XrhxkL6sL9JHt6e7tWDsGNLMCR2/QECIsohVu15Q5x7JIgaywJ9ax802ZaKyasFcIoEoQ==, tarball: file:vendor/byakugan-cli-0.1.0.tgz}
+    resolution: {integrity: sha512-g9BeJaYLYyIe+TyKtssVq7n3z/QEZ5EJcQUfVz2PCUjbMubemaUc0jhdOp9JG8RJ3AvkFhkb5uZyXjV2VFI+kw==, tarball: file:vendor/byakugan-cli-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.12'}
     hasBin: true

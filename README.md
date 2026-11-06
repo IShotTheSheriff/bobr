@@ -89,7 +89,7 @@ the right column shows what `main` reruns with Bazel.
 | ----------------------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
 | Body of `sub`, which only docs uses       | docs build, browser, type check and unit tests            | docs build, browser and unit tests              |
 | Body of `add`, which only web uses        | web build, browser, type check and unit tests             | web build, browser and unit tests               |
-| Comment inside a used shared function     | web build, browser, type check and unit tests             | nothing                                         |
+| Comment inside a used shared function     | nothing                                                   | nothing                                         |
 | New utility module that no app imports    | nothing                                                   | nothing                                         |
 | UI component that no app renders          | nothing                                                   | nothing                                         |
 | Unused export in a used module            | nothing                                                   | nothing                                         |
@@ -100,17 +100,20 @@ the right column shows what `main` reruns with Bazel.
 | Shared ESLint rule                        | lint of every package                                     | lint of every package                           |
 | Shared tsconfig                           | everything                                                | everything                                      |
 
-Any edit to `packages/ui` also reruns that package's own type check and lint.
-A unit test in `packages/ui` reruns only when the code it reaches changes.
+Any code edit in `packages/ui` also reruns that package's own type check and
+lint. A comment edit there reruns only its lint, since ESLint reads whole
+files. A unit test in `packages/ui` reruns only when the code it reaches
+changes.
 
-Three rows differ from Bazel. byakugan hashes a declaration's text, comments
-included, so a comment inside a used function rebuilds the app. The proof's
-oracle shows that the rebuilt archive is identical, so that build was wasted.
-A type check reruns when the body of a function it reaches changes, where
-Bazel compiles against declarations and reruns only on a signature change.
-In the other direction, byakugan splits a component file into declarations,
-so a new export next to a used component changes nothing. Bazel keeps files
-with JSX whole and rebuilds.
+byakugan leaves comments out of its hashes, so a comment edit rebuilds
+nothing, as with Bazel. Comments that change what a tool does, such as
+`#__PURE__` or `@ts-expect-error`, still count.
+
+Two rows differ from Bazel. A type check reruns when the body of a function
+it reaches changes, where Bazel compiles against declarations and reruns only
+on a signature change. In the other direction, byakugan splits a component
+file into declarations, so a new export next to a used component changes
+nothing. Bazel keeps files with JSX whole and rebuilds.
 
 ## The oracle
 
@@ -150,7 +153,7 @@ logs and `results.json` with every task that ran.
 | Add an unused export next to the `Code` component      | Reused               | Reused               |
 | Change used `add`                                      | Rebuilt              | Reused               |
 | Change used `sub`                                      | Reused               | Rebuilt              |
-| Add a comment inside used `add`                        | Rebuilt, same output | Reused               |
+| Add a comment inside used `add`                        | Reused               | Reused               |
 | Add an effect to a module no app imports               | Reused               | Reused               |
 | Add or change an effect in `add`'s module              | Rebuilt              | Reused               |
 | Add a component and folder to web                      | Rebuilt              | Reused               |

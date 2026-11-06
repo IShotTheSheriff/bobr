@@ -195,11 +195,11 @@ edit("packages/docs-e2e/src/index.test.ts", '"45"', '"44"');
 edit("packages/docs-e2e/src/index.test.ts", '"46"', '"45"');
 step("used-sub", [...ui, ...subTest, ...docs, ...docsTest, "lint:docs"]);
 
-// A comment inside a used function. byakugan hashes a declaration's text,
-// comments included, so the app rebuilds. The oracle shows whether its
-// output changed.
+// A comment inside a used function. byakugan leaves comments out of its
+// hashes, so only the lint of @repo/ui reruns, since ESLint reads whole files.
+// The oracle checks that the reused web build matches a fresh one.
 edit("packages/ui/src/utils/add/index.ts", "return a + 13;", "// The offset the home page shows.\n  return a + 13;");
-step("comment-in-used-function", [...ui, ...addTest, ...web, ...webTest]);
+step("comment-in-used-function", ["lint:ui"]);
 
 // @repo/ui declares sideEffects false, so Turbopack drops a module whose
 // exports nobody uses, effects included. byakugan skips it too, and the
