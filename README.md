@@ -19,7 +19,7 @@ pnpm test:bazel-next          # Disposable mutation and remote-cache experiment
 
 | Check         | Example target                   | What it reads                                   |
 | ------------- | -------------------------------- | ----------------------------------------------- |
-| Type check    | `//apps/web:typecheck`           | App files and the UI types the app reaches      |
+| Type check    | `//apps/web:typecheck`           | App files and the shared types the app reaches  |
 | Lint          | `//apps/web:lint`                | App files and the ESLint config                 |
 | Unit test     | `//apps/web:lib/calculator.test` | One esbuild bundle of the code the test reaches |
 | Browser test  | `//packages/web-e2e:test`        | The Vercel deployment archive                   |
@@ -62,13 +62,13 @@ checks that ran, and the ones Bazel reused from cache.
 ## The build boundary
 
 ```text
-App imports + complete UI sources
+App entries + the workspace packages in its dependencies
              |
-   UiProjection and UiTypes, esbuild and tsc
-             |                         \
-  App-specific ui_runtime tree     ui_types tree (components + declarations)
-             |                           |
-  NextBuild, vercel build --standalone   app type check
+   Projection and TypesProjection (tools/bazel/projection.ts)
+             |                              \
+  node_modules/.projection/runtime     node_modules/.projection/types
+             |                              |
+  NextBuild, vercel build --standalone      app type check
              |
         vercel_output.tar
                     |
@@ -77,29 +77,65 @@ App imports + complete UI sources
            vercel deploy --prebuilt
 ```
 
-`UiProjection` follows imports from Next's entry files (`app/`, `pages/`,
-`middleware`, `proxy` and `instrumentation`) into reachable UI components. It
-bundles the utility barrel with only the requested exports. Unreachable
-component files never enter Next's input tree. Reachable React files retain
-their directives and contents, so each UI file may export one runtime value. A
-file is then one component, and an app's inputs hold only the components it
-renders. The projection rejects a second runtime export and names a file to
-move it to. Type exports do not count. Utility module side effects remain,
-including effects in unused barrel branches and relative side-effect imports.
-The projection ignores `sideEffects: false` and `PURE` annotations when
-retaining those effects.
+`Projection` starts at the files Next compiles by convention: App Router and
+Pages files for the app's `pageExtensions`, `middleware`, `proxy`,
+`instrumentation` and `next.config`. It follows imports into every workspace
+package in the app's `dependencies` and into the workspace packages those
+depend on. Resolution follows `exports` and `imports` with their conditions,
+wildcards and null targets, tsconfig `paths`, and `.js` specifiers that point
+at `.ts` files.
 
-`UiTypes` builds the type checker's view of the same package. It copies the
-components the app's code and tests reach, including type-only imports, and
-writes declarations for only the utility exports the app names. A body change in
-a shared utility leaves every app's type check cached. A signature change reruns
-only the apps that import that utility.
+Every module keeps its path and its text. A file Next must compile as a whole is
+copied byte for byte: JSX, a `"use client"` or `"use server"` directive,
+CommonJS, styles and assets. Other modules lose the top-level statements that no
+used export reaches and that cannot run code. They also lose comments and
+indentation, so a comment edit inside a used function changes nothing. An unused
+import of a module that the package's `sideEffects` field marks as free of
+effects disappears, as webpack drops it. Other unused imports stay as a bare
+`import "x"`. An initializer that can run code stays unless `/*#__PURE__*/`
+marks it.
+
+Styles follow `@import`, `@use`, `url()` and CSS modules' `composes`. A
+directory Tailwind scans through `@source`, `source()` or a Tailwind 3 `content`
+glob is copied whole, because its files must match the source byte for byte.
+
+The Next build copies the projected packages to their own directories, such as
+`packages/ui`, and links them from the app's `node_modules` as pnpm does.
+Modules resolve, and Next names them, exactly as in a build of the whole
+repository. `next.config.js` needs no alias.
+
+`TypesProjection` builds the type checker's view the same way, type-only imports
+included. A module TypeScript can emit declarations for becomes those
+declarations, cut down to the names the app uses. A body change in a shared
+utility leaves every app's type check cached. A signature change reruns only the
+apps that import that utility. Components stay whole.
+
+Some code names its files at runtime: `import(name)` or `require(name)` with no
+static prefix, `fs` reads, `import.meta.url`, `__dirname` and a computed
+`require.resolve`. The projection then copies the module's directory, or the
+whole package for a computed import, and writes a line to its report,
+`node_modules/.projection/<mode>.json` next to the tree. Next never reads the
+report, and CI's run summary prints it for each app. `--define=projection=strict`
+turns every fallback into an error.
 
 An unused export edit reruns the projection. If it produces identical files,
 Bazel reuses the existing Next and Vercel output and cached browser test result.
 Next's output can be nondeterministic because no second Next build executes on
 that cache hit. No output normalization or developer-maintained semantic hashes
 control this decision.
+
+The projection is a model of what Next reads, so it has an oracle.
+`//apps/web:equivalence_test` builds the app twice more, against the projection
+and against every workspace package whole, and compares the two archives. Both
+builds use webpack's path-based module ids, so the sandbox path stays out of
+them. The comparison replaces content hashes, sandbox paths and Next's
+per-build keys. A difference means the projection dropped something Next reads,
+such as a Tailwind class. The test is manual. CI runs it weekly and whenever the
+build setup changes:
+
+```bash
+bazel test //apps/web:equivalence_test //apps/docs:equivalence_test
+```
 
 The tests run the generated Vercel function handlers and static files from an
 isolated copy. They check hydration, calculator updates, navigation, API calls
@@ -116,11 +152,11 @@ run.
 | Body of `sub`, which only docs uses       | nothing                                | build, browser and unit tests             |
 | Body of `add`, which only web uses        | build, browser and unit tests          | nothing                                   |
 | Signature of `sub`                        | nothing                                | build, browser and unit tests, type check |
-| Comment in a shared utility               | nothing                                | nothing                                   |
+| Comment inside a used shared function     | nothing                                | nothing                                   |
 | New utility module that no app imports    | nothing                                | nothing                                   |
 | UI component that no app renders          | nothing                                | nothing                                   |
 | UI component that only web renders        | build, browser tests, type check       | nothing                                   |
-| Second export added to that web component | rejected, naming a file to move it to  | nothing                                   |
+| Second export added to that web component | build, browser tests, type check       | nothing                                   |
 | New npm dependency used by docs           | nothing                                | build, browser tests, type check, lint    |
 | New folder and component in web           | build, browser tests, type check, lint | nothing                                   |
 | App README                                | nothing                                | nothing                                   |
@@ -150,9 +186,17 @@ trees and deployment archive bytes, and saves JSON evidence with execution logs.
 | Change an unused export in the same module as `add` | Reused                      | Reused                       |
 | Change used `add`                                   | Execute                     | Reused                       |
 | Change used `sub`                                   | Reused                      | Execute                      |
-| Add or change a reachable module side effect        | Execute                     | Execute                      |
+| Add an effect to a module no app imports            | Reused                      | Reused                       |
+| Add or change an effect in `add`'s module           | Execute                     | Reused                       |
+| Change an effect behind a bare `import "./utils"`   | Reused                      | Reused                       |
+| The same after removing `sideEffects` from the UI   | Execute                     | Execute                      |
 | Start a fresh client with only HTTP cache access    | Cache hit                   | Cache hit                    |
 | Edit an unused export on another fresh client       | Cache hit                   | Cache hit                    |
+
+`@repo/ui` declares `"sideEffects": false`, so webpack drops a module whose
+exports nobody uses, effects included. The two reused effect rows also run the
+equivalence check, which shows that a build of the whole package drops the
+effect too.
 
 The HTTP fixture uses separate producer and consumer Bazel output bases, no
 disk cache, and a consumer that cannot upload results. This tests the remote
@@ -176,13 +220,23 @@ AWS provisioning still needs an account and cache domain. Until then, CI keeps
 Bazel's disk cache in the GitHub Actions cache, which pull requests read from
 `main`.
 
-This remains a bounded PoC. React files stay whole for Next, which is why a UI
-file may export only one runtime value. Namespace imports
-retain all utility exports. Unsupported computed imports, asset lookups, utility
-leaf imports and shared UI styles fail explicitly. A new shared workspace package
-gets checks from `shared_package()`, but apps consume it whole until the
-projection covers it. `.env` files in an app are build inputs. Values from the
-CI environment or the network are not, so declare them before an app reads them.
+This remains a bounded PoC. Files with JSX, directives or CommonJS stay whole,
+so any edit to a component file rebuilds every app that renders it. Namespace
+imports keep every export. Code that finds files at runtime costs its directory
+or package, and the report lists each case. A new shared workspace package gets
+checks from `shared_package()`, and every app that lists it in `dependencies`
+gets its projection. Workspace packages in `devDependencies`, such as the
+ESLint and TypeScript configs, stay whole. `.env` files in an app are build
+inputs. Values from the CI environment or the network are not, so declare them
+before an app reads them.
+
+The Next build uses webpack. Turbopack refuses the symlinks that Bazel's
+sandbox builds an action's inputs from, and fails with `Symlink
+[project]/apps/web/package.json is invalid, it points out of the filesystem
+root`. Outside Bazel, a Turbopack build of `apps/web` against the projection
+matched a build against the whole package, apart from the keys Next generates
+for every build. The projection works with both bundlers. The sandbox is the
+limit.
 
 See [the evaluation](spec/BAZEL_EVALUATION.md) for evidence and remaining gaps.
 [The migration notes](spec/BAZEL_MIGRATION.md) describe the original graph.

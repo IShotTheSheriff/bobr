@@ -13,6 +13,15 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 APPS = {"web", "docs"}
+PROJECTION = "node_modules/.projection/runtime"
+
+
+def raw_ui_input(path):
+    """A Next input that holds @repo/ui itself rather than its projection."""
+    if path.startswith("packages/ui/") or "@repo+ui@" in path or "/node_modules/@repo/ui" in path:
+        return True
+    # The projected package's npm links live under its own node_modules.
+    return "/bin/packages/ui/" in path and "/bin/packages/ui/node_modules/" not in path
 
 
 def digest_tree(directory):
@@ -81,13 +90,13 @@ def main():
         logfile = base / f"{case}.log"
         execution = base / f"{case}.actions.json"
         with logfile.open("w") as output:
-            result = subprocess.run(command + (["test", "//packages/web-e2e:test", "//packages/docs-e2e:test"] if args.browser else ["build"]) + ["//apps/web:next_build", "//apps/docs:next_build", "//apps/web:ui_projection", "//apps/docs:ui_projection"] + flags + [f"--execution_log_json_file={execution}"], cwd=checkout, stdout=output, stderr=subprocess.STDOUT)
+            result = subprocess.run(command + (["test", "//packages/web-e2e:test", "//packages/docs-e2e:test"] if args.browser else ["build"]) + ["//apps/web:next_build", "//apps/docs:next_build", "//apps/web:projection", "//apps/docs:projection"] + flags + [f"--execution_log_json_file={execution}"], cwd=checkout, stdout=output, stderr=subprocess.STDOUT)
         if result.returncode:
             raise AssertionError(f"{case} failed. See {logfile}\n{logfile.read_text()[-8000:]}")
         recorded = list(actions(execution))
         next_actions = [a for a in recorded if a.get("mnemonic") == "NextBuild"]
         projected = {a["targetLabel"].split("/")[3].split(":")[0] for a in recorded
-                     if a.get("mnemonic") == "UiProjection" and not a.get("cacheHit")}
+                     if a.get("mnemonic") == "Projection" and not a.get("cacheHit")}
         expected_projection = set() if case in {"no-op", "restore-from-disk-cache", "restore-from-remote-cache"} else APPS
         assert projected == expected_projection, f"{case}: projection executed {projected}, expected {expected_projection}"
         executed = {a["targetLabel"].split("/")[3].split(":")[0] for a in next_actions if not a.get("cacheHit")}
@@ -104,9 +113,9 @@ def main():
                 assert browser_hits == cache_hits, f"{case}: Playwright cache hits {browser_hits}, expected {cache_hits}"
             assert browser_executed == expected, f"{case}: Playwright executed {browser_executed}, expected {expected}"
         for action in next_actions:
-            raw = [i["path"] for i in action["inputs"] if "packages/ui/" in i["path"] or "@repo+ui@" in i["path"]]
+            raw = [i["path"] for i in action["inputs"] if raw_ui_input(i["path"])]
             assert not raw, f"Raw UI sources leaked into Next inputs: {raw}"
-        current = {app: {"projection": digest_tree(base / "links/bin/apps" / app / "ui_runtime")} for app in APPS}
+        current = {app: {"projection": digest_tree(base / "links/bin/apps" / app / PROJECTION)} for app in APPS}
         for app in APPS:
             archive = base / "links/bin/apps" / app / "vercel_output.tar"
             current[app]["vercel"] = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -119,6 +128,15 @@ def main():
         results.append({"case": case, "projection_executed": sorted(projected), "next_executed": sorted(executed), "next_cache_hits": sorted(hits), "browser_executed": sorted(browser_executed), "browser_cache_hits": sorted(browser_hits), "digests": current})
         (base / "results.json").write_text(json.dumps(results, indent=2) + "\n")
         print(f"PASS {case}: Next executed {sorted(executed)}; cache hits {sorted(hits)}", flush=True)
+
+    def equivalence(case):
+        """Builds each app again from the whole workspace packages and compares the archives."""
+        logfile = base / f"{case}.equivalence.log"
+        with logfile.open("w") as output:
+            result = subprocess.run(command + ["test", "//apps/web:equivalence_test", "//apps/docs:equivalence_test", "--test_output=errors"] + flags, cwd=checkout, stdout=output, stderr=subprocess.STDOUT)
+        if result.returncode:
+            raise AssertionError(f"{case}: the projected build differs from the whole build. See {logfile}\n{logfile.read_text()[-8000:]}")
+        print(f"PASS {case}: projected and whole builds match", flush=True)
 
     utils = checkout / "packages/ui/src/utils"
     barrel = utils / "index.ts"
@@ -154,15 +172,20 @@ def main():
         for spec in (checkout / "packages/docs-e2e/src").glob("*.ts"):
             spec.write_text(spec.read_text().replace('"45"', '"44"').replace('"46"', '"45"'))
     run("used-sub", {"docs"}, {"docs"})
+    # @repo/ui declares sideEffects false, so webpack drops a module that no
+    # import uses, effects included. The projection drops it too. The
+    # equivalence check shows that a build of the whole package agrees.
     unused.write_text('globalThis.__bobr_side_effect__ = "effect-one";\nexport const unused = () => 202;\n')
-    run("side-effect-in-unused-branch", APPS, APPS)
-    unused.write_text(unused.read_text().replace("effect-one", "effect-two"))
-    run("changed-side-effect", APPS, APPS)
-    for app in APPS:
-        projection = base / "links/bin/apps" / app / "ui_runtime/utils/index.js"
-        assert "effect-two" in projection.read_text()
-        archive = base / "links/bin/apps" / app / "vercel_output.tar"
-        assert any("effect-two" in text for text in archive_scripts(archive)), f"{app}: Next dropped the side effect"
+    run("side-effect-in-unused-branch", set(), set())
+    equivalence("side-effect-in-unused-branch")
+    # An effect in a module an app uses reaches that app's bundle.
+    add.write_text(add.read_text() + '\nglobalThis.__bobr_used_effect__ = "effect-one";\n')
+    run("side-effect-in-used-module", {"web"}, {"web"})
+    add.write_text(add.read_text().replace("effect-one", "effect-two"))
+    run("changed-side-effect", {"web"}, {"web"})
+    projected_add = base / "links/bin/apps/web" / PROJECTION / "packages/ui/src/utils/add/index.ts"
+    assert "effect-two" in projected_add.read_text()
+    assert any("effect-two" in text for text in archive_scripts(base / "links/bin/apps/web/vercel_output.tar")), "web: Next dropped the side effect"
     # A new output base cannot reuse the producer's local outputs/action cache.
     if remote:
         command[-1] = f"--output_base={base / 'consumer'}"
@@ -180,8 +203,6 @@ def main():
         assert remote.reads > 0 and remote.writes == writes, "Read-only consumer wrote to the remote cache"
         (base / "remote-cache-evidence.json").write_text(json.dumps({"successful_reads": remote.reads, "producer_writes": writes, "consumer_writes": remote.writes - writes}, indent=2) + "\n")
     # Consume utilities only through a component's bare relative import.
-    # This used to emit an empty utility projection and silently lose effects.
-    # A UI file may export one runtime value, so each utility gets its own file.
     for name, body in (("add", "a + b + 13"), ("sub", "a - b - 6")):
         (checkout / f"packages/ui/src/proof-{name}.tsx").write_text(f'import /* comment */ "./utils";\nexport const {name} = (a: number, b: number = 0) => {body};\n')
     for app in APPS:
@@ -194,11 +215,23 @@ def main():
             assert 'from "@repo/ui/utils"' not in text, f"{file}: update the proof's import rewrite"
             file.write_text(text)
     run("relative-side-effect-import", APPS, APPS)
-    unused.write_text(unused.read_text().replace("effect-two", "relative-effect-three"))
+    # Under sideEffects false, webpack drops a bare import of a module whose
+    # exports nobody uses, so its effects never run.
+    unused.write_text(unused.read_text().replace("effect-one", "relative-effect-three"))
+    run("unused-effect-behind-relative-import", set(), set())
+    equivalence("unused-effect-behind-relative-import")
+    # Without the flag, every module counts as having effects, so the bare
+    # import keeps the barrel and the unused module.
+    manifest = checkout / "packages/ui/package.json"
+    metadata = json.loads(manifest.read_text())
+    del metadata["sideEffects"]
+    manifest.write_text(json.dumps(metadata, indent=2) + "\n")
+    run("package-without-side-effects-flag", APPS, APPS)
+    unused.write_text(unused.read_text().replace("relative-effect-three", "relative-effect-four"))
     run("changed-relative-side-effect", APPS, APPS)
     for app in APPS:
         archive = base / "links/bin/apps" / app / "vercel_output.tar"
-        assert any("relative-effect-three" in text for text in archive_scripts(archive)), f"{app}: Next dropped the relative import's side effect"
+        assert any("relative-effect-four" in text for text in archive_scripts(archive)), f"{app}: Next dropped the relative import's side effect"
     print(f"All cases passed. Full action logs and digests: {base / 'results.json'}", flush=True)
 
 

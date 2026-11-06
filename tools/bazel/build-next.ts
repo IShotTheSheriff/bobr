@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import * as tar from "tar";
 import checkArtifact from "./check-artifact.ts";
+import linkProjection from "./link-projection.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -14,6 +15,13 @@ const settings = JSON.parse(fs.readFileSync("vercel-build.json", "utf8"));
 const appDirectory = process.cwd();
 const rootDirectory = path.resolve("../..");
 settings.rootDirectory = path.relative(rootDirectory, appDirectory);
+// The app's workspace packages: the projection, or for the equivalence check
+// every package whole, at the same paths.
+linkProjection(
+  path.join(appDirectory, process.env.BOBR_PROJECTION || "node_modules/.projection/runtime"),
+  rootDirectory,
+  settings.rootDirectory,
+);
 process.chdir(rootDirectory);
 fs.mkdirSync(".vercel", { recursive: true });
 fs.writeFileSync(
@@ -70,10 +78,11 @@ fs.writeFileSync(
 
 // The archive is the sole deployment output. It preserves package symlinks
 // through remote caching and runfiles, where expanded directories can differ.
+const archive = process.env.BOBR_ARCHIVE || "vercel_output.tar";
 tar.c(
   {
     cwd: path.join(appDirectory, "vercel_output"),
-    file: path.join(appDirectory, "vercel_output.tar"),
+    file: path.join(appDirectory, archive),
     sync: true,
     portable: true,
     noMtime: true,

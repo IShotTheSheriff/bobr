@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Report which Next builds and checks ran and which came from cache.
 
-Reads Bazel JSON execution logs and appends a table to the GitHub step summary.
+Reads Bazel JSON execution logs and appends a table to the GitHub step summary,
+followed by what each app's projection kept and where it fell back to whole
+files.
 """
 import json
 import os
@@ -54,10 +56,39 @@ def notice(ran, cached, cache=""):
     return "::notice title=What this commit ran::" + text
 
 
+def projection_reports(bin_dir):
+    """The projection reports Bazel wrote, one per app and mode. The equivalence
+    check's copy of whole packages is left out."""
+    reports = [json.loads(path.read_text()) for path in sorted(Path(bin_dir).glob("apps/*/node_modules/.projection/*.json"))]
+    return [item for item in reports if item.get("mode") != "copy"]
+
+
+def projection_report(reports):
+    if not reports:
+        return ""
+    lines = ["### Projection", "", "| App | Mode | Package | Files | Whole | Sliced |", "| --- | --- | --- | --- | --- | --- |"]
+    for item in reports:
+        for name, counts in sorted(item["packages"].items()):
+            lines.append(f"| `{item['app']}` | {item['mode']} | `{name}` | {counts['files']} | {counts['whole']} | {counts['sliced']} |")
+    notes = []
+    for item in reports:
+        for fallback in item["fallbacks"]:
+            included = ", ".join(f"`{path}`" for path in fallback["included"]) or "every route file"
+            notes.append(f"- `{item['app']}` {item['mode']}: `{fallback['file']}` has `{fallback['pattern']}`, so {included} stays whole ({fallback['width']}).")
+        for unresolved in item["unresolved"]:
+            notes.append(f"- `{item['app']}` {item['mode']}: `{unresolved['file']}` imports `{unresolved['specifier']}`, which does not resolve.")
+    if notes:
+        lines += ["", "Fallbacks and unresolved imports:", ""] + notes
+    return "\n".join(lines) + "\n"
+
+
 def main():
     entries = [spawn for path in sys.argv[1:] if Path(path).exists() for spawn in spawns(path)]
     ran, cached = summarize(entries)
     text = report(ran, cached)
+    projections = projection_report(projection_reports("bazel-bin"))
+    if projections:
+        text += "\n" + projections
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
             summary.write(text)

@@ -107,15 +107,18 @@ bazel aquery 'inputs(".*/utils/add\.ts", deps(//apps/web:test))'    # -> matches
 
 ## 5. Skip the actual Next build after an unused barrel change
 
-Both apps use `next_app_build` from `tools/bazel/defs.bzl`. It creates two actions:
+Both apps call `next_app()` from `tools/bazel/defs.bzl`. Two of its actions
+decide whether Next runs:
 
-1. `UiProjection` reads the app source and complete UI package. The TypeScript
-   parser discovers requested exports, then esbuild bundles the utility barrel
-   into `ui_runtime/utils/index.js`. Other UI components retain their source
-   files and directives.
-2. `NextBuild` receives the generated tree through a webpack alias. The raw UI
-   package is absent from this action's inputs. Next emits the complete `.next`
-   tree without output normalization.
+1. `Projection` reads the app and every workspace package in its
+   `dependencies`. It follows imports from Next's entry files and writes the
+   modules the app reaches under `node_modules/.projection/runtime`, at their
+   own paths. Files with JSX or directives stay whole. Utility modules keep only
+   the statements a used export reaches.
+2. `NextBuild` copies the projected packages to their directories in the
+   sandbox and links them from the app's `node_modules`. The raw packages are
+   absent from this action's inputs. Next emits the complete `.next` tree
+   without output normalization.
 
 An unused export change invalidates the first action. When its output is
 identical, Bazel skips the second action. This works before Next's random output
@@ -141,46 +144,28 @@ Next trees, and rejects raw UI package inputs on any Next action.
 | Unused export added to a used module | Both | Neither |
 | Used `add` changes | Both | Web |
 | Used `sub` changes | Both | Docs |
-| Effect added in unused barrel branch | Both | Both |
-| That effect changes | Both | Both |
+| Effect added in a module no app imports | Both | Neither |
+| Effect added to `add`'s module, then changed | Both | Web |
 | `bazel clean`, then build | Neither | Neither, both restored from disk cache |
+| Effect behind a bare `import "./utils"` changes | Both | Neither |
+| `sideEffects` removed from `@repo/ui`, then that effect changes | Both | Both |
 
-The effect must also appear in the emitted browser chunks. The script's hashes
-are assertions, not cache keys supplied to Bazel. An ignored, preexisting
-`next-env.d.ts` is no longer required, so the proof works from a clean copy.
+`@repo/ui` declares `"sideEffects": false`, so webpack drops a module no import
+uses, effects included. For the two effect rows where Next does not run, the
+script also runs the equivalence check, which builds both apps against the whole
+package and finds the same archives. An effect that reaches a bundle must appear
+in the emitted browser chunks. The script's hashes are assertions, not cache
+keys supplied to Bazel.
 
-### Supported code and failure behavior
+### Supported code and fallbacks
 
-The projection supports static ESM imports among local `.ts` utility modules.
-It ignores package `sideEffects` and `PURE` annotations so real initialization
-effects survive. Named imports select exports automatically; namespace imports
-and dynamic literal imports in the app conservatively retain all exports.
-
-Direct utility subpaths, computed app imports, dynamic utility imports,
-`require` or `eval` in utilities, and React/server directives in utilities fail
-with an explicit error. Changed package export mappings also require updating
-the projection. React modules are copied without bundling, so each may export
-one runtime value. The projection rejects a second one. New Bazel packages
-must still be included in the UI source filegroups.
-
-`//tools/bazel:project_ui_test` covers namespace/default exports, effects hidden
-behind annotations, and unsupported constructs. The existing utility tests
-remain independent. Next skips app type checking, so these checks do not prove
-that the full applications type-check.
-
-### Deployment and remote-cache limits
-
-The proof restores the exact artifact from a local disk CAS after deleting
-Bazel's build outputs. It does not prove cross-machine relocatability or Vercel
-compatibility. The actions permit remote caching, but using it for deployment
-still requires declaring build-time environment and fetched content and testing
-artifact portability. Preview and production configurations can require distinct
-keys even when the source is identical.
-
-Vercel Build Output packaging, deployment selection, and Playwright tests against
-that artifact remain separate work. Do not recover cache hits by stripping Next
-manifests or server output from a hash. The projection avoids the unnecessary
-build while preserving the full artifact from the previous build.
+[The build boundary](../README.md#the-build-boundary) lists what the projection
+follows and where it falls back wide. `//tools/bazel:projection_test` pairs each
+precision claim with a runtime check: it bundles the app against the projection
+and against the whole packages with esbuild and compares what the bundles do.
+`//apps/web:equivalence_test` and `//apps/docs:equivalence_test` do the same
+with real Next builds. Next skips app type checking, so the app `typecheck`
+targets check the applications against the types projection.
 
 ## 6. Toolchain notes
 

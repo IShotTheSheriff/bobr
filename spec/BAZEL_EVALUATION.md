@@ -11,8 +11,9 @@ work, and Vercel should deploy the tested artifact.
 | Goal                                 | Implementation and evidence boundary                                                                                                                                                                                  |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Skip Next for unused utility exports | The mutation experiment checks actual Next actions and unchanged projection bytes for barrel and same-module exports.                                                                                                 |
-| Invalidate used exports and effects  | The experiment covers `add`, `sub`, unused barrel branches with effects and relative side-effect imports.                                                                                                             |
-| Ignore unreachable UI components     | Traversal starts at app imports. Unreachable files and their utility imports do not enter Next inputs. Reachable React modules remain whole files with one runtime export each.                                       |
+| Invalidate used exports and effects  | The experiment covers `add`, `sub`, effects in used and unused modules under `sideEffects: false`, the same package without the flag, and relative side-effect imports.                                               |
+| Ignore unreachable UI components     | Traversal starts at Next's entry files. Unreachable files and their utility imports do not enter Next inputs. Reachable files with JSX, directives or CommonJS stay whole.                                            |
+| Check the projection against Next    | `equivalence_test` builds each app against whole workspace packages and compares the archive with the projected build's. It passed for both apps, and it failed when a projection bug dropped a side effect.          |
 | Reuse nondeterministic Next output   | Bazel reuses the stored action output when projected inputs match. It never compares two independently rebuilt Next outputs to decide reuse.                                                                          |
 | Share build results                  | Normal package commands and CI use the shared-cache wrapper. Fresh clients restore Next and browser actions through the actual Caddy/bazel-remote stack with disk caching disabled. AWS provisioning remains pending. |
 | Preserve browser coverage            | Two Bazel targets test the deployment archive, covering hydration, interaction, navigation, API and 404 behavior.                                                                                                     |
@@ -20,7 +21,7 @@ work, and Vercel should deploy the tested artifact.
 | Avoid duplicate deployments          | Reuse checks match archive bytes, settings, environment versions and branch scope against a ready deployment. Hosted runs reused unchanged apps and created a deployment only for the app whose archive changed.      |
 | Avoid manual hashes                  | Bazel owns action keys. The browser pin updater generates download hashes. Evidence hashes are assertions, not build inputs maintained by developers.                                                                 |
 | Avoid build-rule edits               | `next_app()` and `shared_package()` take inputs from each package's files and npm links from `pnpm-lock.yaml`. New pages, folders, utilities, tests and npm dependencies need no BUILD change.                        |
-| Cache every check                    | Type checks, lint and unit tests are Bazel tests. App type checks read declarations for the UI exports they name. Unit tests read an esbuild bundle of the code they reach.                                           |
+| Cache every check                    | Type checks, lint and unit tests are Bazel tests. App type checks read declarations for the shared exports they name. Unit tests read an esbuild bundle of the code they reach.                                       |
 
 The code addresses the four open implementation areas. Preview deployment and
 reuse are verified on Vercel; see [Hosted deployment](#hosted-deployment).
@@ -152,27 +153,38 @@ DNS/TLS, availability and capacity still need validation on the chosen VM.
 
 ## Remaining maintenance limits
 
-The projection supports this repository's export map and static module layout.
-It fails explicitly on patterns it cannot track, including computed imports,
-`import.meta` asset lookups, `require.resolve`, utility leaf imports and shared
-UI styles. Literal dynamic imports into React modules are traversed. Utilities
-require static ESM and cannot contain React/server directives.
+The projection follows every workspace package an app lists in `dependencies`,
+including the workspace packages those depend on. Resolution covers `exports`
+and `imports` conditions, wildcards, tsconfig `paths` and `.js` specifiers.
+Files with JSX, directives or CommonJS stay whole, so any edit to a component
+file rebuilds every app that renders it. Utility modules lose the statements no
+used export reaches. Namespace imports keep every export.
 
-Unreachable modules are excluded. A reachable React module stays whole, so the
-projection allows it one runtime export and rejects a second one with a file
-name to move it to. Type exports do not count. Namespace utility imports retain
-every export.
-Files under `app/` and `pages/`, plus `middleware`, `proxy` and
-`instrumentation` files, are conservatively roots. Other app folders count when
-a root imports them, through relative paths or tsconfig `paths`. This is a useful
-bounded optimizer, not a replacement for Next's own route and React compiler
-analysis.
+Code that names its files at runtime falls back wide instead of failing. A
+computed import without a static prefix costs its package. `fs` reads,
+`import.meta.url`, `__dirname` and a computed `require.resolve` cost the
+module's directory. A Tailwind `@source` directory is copied whole. Each case
+writes a line to the projection report, and `--define=projection=strict` turns
+it into an error.
+
+Entry files follow Next 16's conventions: App Router and Pages files for the
+app's `pageExtensions`, root files such as `middleware`, `proxy` and
+`instrumentation`, and `next.config`. Check the list on every Next major. When
+`pageExtensions` is not a literal list, every code file in the route folders
+counts. Other app folders count when an entry imports them. This is a bounded
+optimizer, not a replacement for Next's own route and React compiler analysis.
+
+The projection is a model of what Next reads. The equivalence check is its
+oracle, and it only runs when CI's trigger sees a build-system change or on the
+weekly schedule. A Next or webpack upgrade arrives through `pnpm-lock.yaml`,
+which triggers it. The Next build stays on webpack because Turbopack rejects
+the symlinks Bazel's sandbox is made of.
 
 Routine edits need no rule changes. A new app still needs a copied four-line
 BUILD file, an e2e package and a Vercel project. `//:build_files_test` fails
 while any workspace package lacks a BUILD file. A new shared package gets its
-checks from `shared_package()`, but apps consume it as a whole package until the
-projection covers it. `pnpm dev` uses source files directly; `pnpm build` and
+checks from `shared_package()`, and every app that lists it in `dependencies`
+gets its projection. `pnpm dev` uses source files directly; `pnpm build` and
 `pnpm test` populate Bazel's production build and test caches.
 
 Build-time environment and remote content need declared inputs before they are

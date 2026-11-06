@@ -41,3 +41,7 @@ use_repo(pnpm, "pnpm")
 
 chromium_repository = use_repo_rule("//tools/bazel:chromium.bzl", "chromium_repository")
 chromium_repository(name = "chromium")
+
+# Names and directories of the pnpm workspace packages, for the projection.
+workspace_packages = use_repo_rule("//tools/bazel:workspace.bzl", "workspace_packages")
+workspace_packages(name = "workspace_packages")

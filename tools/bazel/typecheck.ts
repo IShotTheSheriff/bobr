@@ -1,13 +1,13 @@
-// Type-check one package. Apps compile against their projected UI types, so
-// UI code they never reach cannot change this check's inputs.
-import fs from "node:fs";
+// Type-check one package. Apps compile against the type view of their
+// workspace packages, so code they never reach cannot change this check's inputs.
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import linkProjection from "./link-projection.ts";
 
 const require = createRequire(import.meta.url);
 
-const [packageDir, uiTypes] = process.argv.slice(2).map((p) => path.resolve(p)) as [string, string | undefined];
+const [packageDir, projection] = process.argv.slice(2).map((p) => path.resolve(p)) as [string, string | undefined];
 const resolve = (id: string) => require.resolve(id, { paths: [packageDir] });
 
 function run(script: string, args: string[]) {
@@ -30,28 +30,6 @@ try {
 if (next) run(next, ["typegen"]);
 
 const typescript = path.dirname(resolve("typescript/package.json"));
-let project = path.join(packageDir, "tsconfig.json");
-if (uiTypes) {
-  const ts: typeof import("typescript") = require(typescript);
-  const parsed = ts.getParsedCommandLineOfConfigFile(project, {}, {
-    ...ts.sys,
-    onUnRecoverableConfigFileDiagnostic(diagnostic) {
-      throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
-    },
-  })!;
-  const base = (parsed.options.pathsBasePath as string | undefined) || packageDir;
-  // Overriding `paths` replaces the whole option, so keep the app's aliases.
-  const paths = Object.fromEntries(
-    Object.entries(parsed.options.paths || {}).map(([alias, targets]): [string, string[]] => [
-      alias,
-      targets.map((target) => path.resolve(base, target)),
-    ]),
-  );
-  paths["@repo/ui/*"] = [path.join(uiTypes, "*")];
-  project = path.join(packageDir, "tsconfig.bazel-typecheck.json");
-  fs.writeFileSync(
-    project,
-    JSON.stringify({ extends: "./tsconfig.json", compilerOptions: { paths } }),
-  );
-}
-run(path.join(typescript, "lib/tsc.js"), ["--noEmit", "-p", project]);
+// The app's type view of its workspace packages, at the packages' own paths.
+if (projection) linkProjection(projection, process.cwd(), path.relative(process.cwd(), packageDir));
+run(path.join(typescript, "lib/tsc.js"), ["--noEmit", "-p", path.join(packageDir, "tsconfig.json")]);

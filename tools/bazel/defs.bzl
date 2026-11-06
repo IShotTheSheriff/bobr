@@ -3,6 +3,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_run_binary", "js_test")
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("@npm//:defs.bzl", "npm_link_targets")
+load("@workspace_packages//:packages.bzl", "WORKSPACE_PACKAGES")
 
 # Files in an app package that no build or check reads. Every other file is an
 # input, so new source folders, configs and .env files need no rule changes.
@@ -14,13 +15,10 @@ _NOT_SOURCES = [
     "eslint.config.*",
     "next-env.d.ts",
     "*.tsbuildinfo",
-    "tsconfig.bazel-typecheck.json",
     "node_modules/**",
     ".next/**",
     ".vercel/**",
     "vercel_output/**",
-    "ui_runtime/**",
-    "ui_types/**",
     "out/**",
     "coverage/**",
 ]
@@ -30,6 +28,10 @@ _NOT_BUILD_INPUTS = _NOT_SOURCES + ["**/*.test.*"]
 
 # Only the lint check loads ESLint and the shared config.
 _LINT_ONLY_DEPS = ["@repo/eslint-config", "eslint"]
+
+# The projection writes into the app's node_modules, which Tailwind's source
+# detection, tsc's `exclude` and ESLint all skip.
+_PROJECTION = "node_modules/.projection/"
 
 def _dep_name(label):
     return label.rsplit(":node_modules/", 1)[1]
@@ -46,6 +48,49 @@ def package_deps(lint = False):
         if lint or _dep_name(dep) not in _LINT_ONLY_DEPS
     ]
 
+def projected_packages(links):
+    """Workspace packages in `dependencies`, and the ones they depend on in turn.
+
+    Packages in `devDependencies`, such as shared configs, stay whole.
+
+    Args:
+      links: the app's production npm links.
+    """
+    names = [_dep_name(link) for link in links if _dep_name(link) in WORKSPACE_PACKAGES]
+    found = []
+
+    # Starlark has no while loop. Each pass adds at least one package or ends.
+    for _ in WORKSPACE_PACKAGES:
+        if not names:
+            break
+        reached = []
+        for name in names:
+            if name in found:
+                continue
+            found.append(name)
+            for link in npm_link_targets(package = WORKSPACE_PACKAGES[name], dev = False):
+                dep = _dep_name(link)
+                if dep in WORKSPACE_PACKAGES and dep not in found:
+                    reached.append(dep)
+        names = reached
+    return sorted(found)
+
+def _package_links(projected, dev):
+    # The projected packages' own npm links. Links between projected packages
+    # come from the projection instead, so their sources stay out.
+    links = []
+    for name in projected:
+        for link in npm_link_targets(package = WORKSPACE_PACKAGES[name], dev = dev):
+            if _dep_name(link) not in projected and link not in links:
+                links.append(link)
+    return links
+
+def _strict():
+    return select({
+        "//tools/bazel:strict_projection": ["--strict"],
+        "//conditions:default": [],
+    })
+
 def next_app():
     """Builds, tests and archives the Next app in the calling package.
 
@@ -57,62 +102,64 @@ def next_app():
     sources = native.glob(["**/*"], exclude = _NOT_BUILD_INPUTS)
     links = package_deps()
 
-    # The projection replaces @repo/ui for the build and the type check.
-    deps = [dep for dep in links if _dep_name(dep) != "@repo/ui"]
+    # The projection replaces each workspace package in `dependencies` for the
+    # build and the type check.
+    projected = projected_packages(npm_link_targets(dev = False))
+    deps = [dep for dep in links if _dep_name(dep) not in projected]
+    packages = ["//%s:pkg" % WORKSPACE_PACKAGES[name] for name in projected]
+    package_args = [
+        "--package=%s=$(rootpath //%s:pkg)=%s" % (name, WORKSPACE_PACKAGES[name], WORKSPACE_PACKAGES[name])
+        for name in projected
+    ]
+    runtime_links = _package_links(projected, dev = False)
+    type_links = _package_links(projected, dev = True)
 
     # The projection reads tsconfig `paths`, which can come from an extended config.
-    tsconfig_deps = [dep for dep in deps if _dep_name(dep) == "@repo/typescript-config"]
-    js_run_binary(
-        name = "ui_projection",
-        srcs = sources + ["//packages/ui:pkg"] + tsconfig_deps,
-        args = [package, "$(rootpath //packages/ui:pkg)", package + "/ui_runtime"],
-        out_dirs = ["ui_runtime"],
-        mnemonic = "UiProjection",
-        tool = "//tools/bazel:project_ui",
-    )
+    configs = [dep for dep in deps if _dep_name(dep) in WORKSPACE_PACKAGES]
+
+    _projection("projection", "runtime", sources + packages + configs, "Projection", package_args)
 
     # Components and utility declarations the app's own code and tests reach.
-    js_run_binary(
-        name = "ui_types",
-        srcs = checked + ["//packages/ui:pkg"] + tsconfig_deps,
-        args = ["--types", package, "$(rootpath //packages/ui:pkg)", package + "/ui_types"],
-        out_dirs = ["ui_types"],
-        mnemonic = "UiTypes",
-        tool = "//tools/bazel:project_ui",
+    _projection("types_projection", "types", checked + packages + configs + type_links, "TypesProjection", package_args)
+    typecheck(
+        srcs = checked + deps + type_links + [":types_projection"],
+        projection = package + "/" + _PROJECTION + "types",
     )
-    typecheck(srcs = checked + deps + [":ui_types"], ui_types = package + "/ui_types")
 
-    # ESLint reads no @repo/ui source, so UI edits never rerun an app's lint.
+    # ESLint reads no workspace package source, so their edits never rerun an
+    # app's lint.
     lint(srcs = checked + native.glob(["eslint.config.*"]) + [
         dep
         for dep in package_deps(lint = True)
-        if _dep_name(dep) != "@repo/ui"
+        if _dep_name(dep) not in projected
     ])
 
-    # Next consumes the generated UI tree. Identical projection bytes reuse the
+    # Next consumes the projection. Identical projection bytes reuse the
     # cached Next artifact even though a fresh Next build is not reproducible.
-    js_run_binary(
-        name = "next_build",
-        srcs = sources + deps + [":ui_projection"],
-        chdir = package,
-        env = select({
-            "//tools/bazel:production": _next_env("production"),
-            "//conditions:default": _next_env("preview"),
-        }),
-        mnemonic = "NextBuild",
-        # The archive is the only output. Leaving `.next` undeclared keeps the
-        # shared cache to one file per Next build.
-        outs = ["vercel_output.tar"],
-        tool = "//tools/bazel:build_next",
-        visibility = ["//visibility:public"],
-        use_execroot_entry_point = True,
-    )
-
+    _next_build("next_build", "vercel_output.tar", sources + deps + runtime_links + [":projection"], "runtime")
     _build_output(
         name = "vercel_archive",
         src = ":next_build",
         basename = "vercel_output.tar",
         visibility = ["//visibility:public"],
+    )
+
+    # The equivalence check builds the app twice more, against the projection
+    # and against every workspace package whole, and compares the archives.
+    # A difference means the projection dropped something Next reads. Webpack
+    # derives some module ids from absolute paths, which differ between
+    # sandboxes, so both builds name modules by path. CI runs the check on a
+    # schedule and when the projection or a bundler changes.
+    _next_build("next_build_named", "vercel_output_named.tar", sources + deps + runtime_links + [":projection"], "runtime", named_ids = True)
+    _projection("projection_whole", "copy", ["package.json"] + packages, "ProjectionCopy", package_args, tags = ["manual"])
+    _next_build("next_build_whole", "vercel_output_whole.tar", sources + deps + runtime_links + [":projection_whole"], "copy", named_ids = True)
+    js_test(
+        name = "equivalence_test",
+        entry_point = "//tools/bazel:compare_archives",
+        data = [":next_build_named", ":next_build_whole", "//:node_modules/tar"],
+        args = ["$(rootpath :next_build_named)", "$(rootpath :next_build_whole)"],
+        size = "large",
+        tags = ["manual", "equivalence"],
     )
 
     unit_tests(srcs = sources + links)
@@ -122,6 +169,45 @@ def next_app():
         name = "pkg",
         srcs = sources,
         visibility = ["//visibility:public"],
+    )
+
+def _projection(name, mode, srcs, mnemonic, package_args, tags = []):
+    package = native.package_name()
+    js_run_binary(
+        name = name,
+        srcs = srcs,
+        args = [
+            "--mode=" + mode,
+            "--app=" + package,
+            "--out=%s/%s%s" % (package, _PROJECTION, mode),
+            "--report=%s/%s%s.json" % (package, _PROJECTION, mode),
+        ] + package_args + _strict(),
+        out_dirs = [_PROJECTION + mode],
+        # The report is a separate output, so a changed report never reruns a
+        # build.
+        outs = [_PROJECTION + mode + ".json"],
+        mnemonic = mnemonic,
+        tool = "//tools/bazel:project",
+        tags = tags,
+    )
+
+def _next_build(name, archive, srcs, mode, named_ids = False):
+    js_run_binary(
+        name = name,
+        srcs = srcs,
+        chdir = native.package_name(),
+        env = select({
+            "//tools/bazel:production": _next_env("production", mode, archive, named_ids),
+            "//conditions:default": _next_env("preview", mode, archive, named_ids),
+        }),
+        mnemonic = "NextBuild",
+        # The archive is the only output. Leaving `.next` undeclared keeps the
+        # shared cache to one file per Next build.
+        outs = [archive],
+        tool = "//tools/bazel:build_next",
+        visibility = ["//visibility:public"],
+        use_execroot_entry_point = True,
+        tags = ["manual"] if named_ids else [],
     )
 
 def shared_package():
@@ -144,19 +230,20 @@ def shared_package():
     if lint_config:
         lint(srcs = files + lint_config + package_deps(lint = True))
 
-def typecheck(srcs, ui_types = None):
+def typecheck(srcs, projection = None):
     """Type-checks the calling package with its tsconfig.json as a cached test.
 
     Args:
       srcs: the package's files and the npm links its types come from.
-      ui_types: the app's projected UI types, which replace @repo/ui sources.
+      projection: the app's type view of its workspace packages, which
+        replaces their sources.
     """
     package = native.package_name()
     js_test(
         name = "typecheck",
         entry_point = "//tools/bazel:typecheck",
-        data = srcs,
-        args = [package] + ([ui_types] if ui_types else []),
+        data = srcs + ["//tools/bazel:link_projection"],
+        args = [package] + ([projection] if projection else []),
     )
 
 def lint(srcs):
@@ -235,11 +322,15 @@ def next_app_e2e(app):
         tags = ["browser"],
     )
 
-def _next_env(target):
-    return {
+def _next_env(target, mode, archive, named_ids):
+    env = {
         "NEXT_TELEMETRY_DISABLED": "1",
         "NODE_ENV": "production",
         "BOBR_BUILD_ID": "bobr-static",
-        "BOBR_UI_PROJECTION": "ui_runtime",
+        "BOBR_PROJECTION": _PROJECTION + mode,
+        "BOBR_ARCHIVE": archive,
         "BOBR_DEPLOY_ENV": target,
     }
+    if named_ids:
+        env["BOBR_NAMED_IDS"] = "1"
+    return env

@@ -8,19 +8,20 @@ const nextConfig = {
   typescript: { ignoreBuildErrors: true },
   // A fixed ID reduces output churn but does not make Next reproducible.
   generateBuildId: async () => process.env.BOBR_BUILD_ID || "bobr-static",
-  ...(process.env.BOBR_UI_PROJECTION
+  experimental: {
+    optimizePackageImports: ["@repo/ui"],
+  },
+  // The equivalence check compares two builds made in different Bazel
+  // sandboxes. Path-based module ids keep the sandbox path out of them.
+  ...(process.env.BOBR_NAMED_IDS
     ? {
         webpack(config) {
-          config.resolve.alias["@repo/ui"] = path.resolve(
-            process.env.BOBR_UI_PROJECTION,
-          );
+          config.optimization.moduleIds = "named";
+          config.optimization.chunkIds = "named";
           return config;
         },
       }
     : {}),
-  experimental: {
-    optimizePackageImports: ["@repo/ui"],
-  },
 };
 
 export default nextConfig;

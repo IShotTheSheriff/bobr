@@ -3,14 +3,15 @@
 You are bringing Bazel builds with file-level change detection to this
 repository. It is a large pnpm monorepo with several Next.js apps, shadcn/ui
 components and multiple shared libraries. The design comes from a working proof
-of concept, bobr: https://github.com/IShotTheSheriff/bobr at commit `338d51a`.
-Clone it next to this repo and read it before changing anything here.
+of concept, bobr: https://github.com/IShotTheSheriff/bobr. Clone it next to
+this repo and read it before changing anything here.
 
 The goal is that a change to shared code rebuilds and retests only the apps
 that use the changed code, and that this works on the code as the team writes it
-today. bobr reaches that goal only for code that follows strict rules. Your main
-job is to replace those rules with automatic handling, so developers never
-restructure code to satisfy the build.
+today. bobr first reached that goal only for code that followed strict rules.
+It has since replaced those rules with automatic handling, so developers never
+restructure code to satisfy the build. Your job is to port that version and
+check it against this repository's code.
 
 ## How bobr works
 
@@ -20,7 +21,9 @@ Read these files in bobr, in this order:
 2. `tools/bazel/defs.bzl`. `next_app()` and `shared_package()` generate every
    target from a glob of the package, so new pages, folders and npm
    dependencies need no BUILD edits.
-3. `tools/bazel/project-ui.ts`. The **projection**, explained below.
+3. `tools/bazel/projection.ts`, with `projection-resolve.ts`,
+   `projection-slice.ts` and `link-projection.ts`. The **projection**,
+   explained below.
 4. `scripts/prove-next-invalidation.py`. The proof that edits rebuild only the
    apps that use them, run in CI by `.github/workflows/bazel-proof.yml`.
 5. `spec/BAZEL_EVALUATION.md`, especially "Remaining maintenance limits".
@@ -29,12 +32,12 @@ Bazel caches each action by the hash of its declared input files. A Next build
 that took all of `@repo/ui` as input would rerun for every UI edit. So before
 Next runs, the projection action reads the app's entry files, follows imports
 into `@repo/ui`, and writes a smaller tree that holds only the files and utility
-exports the app reaches. Next builds against that tree through a webpack alias
-(`apps/web/next.config.js`, `BOBR_UI_PROJECTION`). When an edit leaves an app's
-projected tree byte-identical, Bazel skips that app's Next build, its browser
-tests and its deploy. This is **early cutoff**. A second mode (`--types`) writes
-the tree the app's type check compiles against, holding declarations only for
-the utilities the app names.
+exports the app reaches. The Next build links that tree as the package itself
+(`tools/bazel/link-projection.ts`). When an edit leaves an app's projected tree
+byte-identical, Bazel skips that app's Next build, its browser tests and its
+deploy. This is **early cutoff**. A second mode (`--mode=types`) writes the tree
+the app's type check compiles against, holding declarations only for the
+utilities the app names.
 
 Other parts to reuse:
 
@@ -48,23 +51,25 @@ Other parts to reuse:
 
 ## Limits in bobr to remove
 
-bobr's projection **fails closed**. On any pattern it cannot trace, it throws and
-the build stops. That kept the proof honest, but it rejects most real code. Each
-row below is a bobr limit and the behaviour to build instead.
+bobr's first projection **failed closed**. On any pattern it could not trace, it
+threw and the build stopped. That kept the proof honest, but it rejected most
+real code. Each row below is one of those limits, cited at commit `338d51a`, and
+the behaviour bobr has now. Use the table as a checklist: find each pattern in
+this repository and confirm a test covers it.
 
-| bobr limit (file:line at `338d51a`) | Build instead |
+| bobr limit (file:line at `338d51a`) | Build instead, as bobr does now |
 | --- | --- |
 | Only `//packages/ui` and the name `@repo/ui` are projected (`defs.bzl` `next_app`) | Project every workspace package an app depends on, found from its `package.json`, including packages that depend on other workspace packages |
 | `package.json` `exports` must equal one fixed map (`project-ui.ts:69`) | Resolve `exports` as Node and TypeScript do, covering conditions, wildcards and subpaths. Also resolve `imports` (`#alias`) and tsconfig `paths` |
 | A React file with a second runtime export is rejected (`:123`) | Accept it and copy the file whole. Savings at the file level are the main value. Savings at the export level are a bonus |
 | The `@repo/ui` root import is rejected (`:215`), and deep utility imports are rejected (`:308`) | Follow barrels through re-export chains to the files that declare the imported names. Write a reduced barrel that re-exports only those names |
-| Utilities must be local `.ts` files with no npm imports (`:411`). shadcn's `cn()` imports `clsx` and `tailwind-merge` | Mark npm imports as external in the esbuild step. Accept `.tsx` utilities |
+| Utilities must be local `.ts` files with no npm imports (`:411`). shadcn's `cn()` imports `clsx` and `tailwind-merge` | npm imports stay imports, so Next resolves them as in a whole build. A `.tsx` utility without JSX is sliced like a `.ts` one |
 | `"use client"` in a utility is rejected (`:421`) | Treat that file as a React file and copy it whole |
 | CSS reached from a UI file is rejected (`:250`) | Follow `@import` and `url()`. Copy CSS modules and the assets they reference |
 | `import.meta` and `require.resolve` are rejected (`:258`) | Handle the literal forms statically, such as `new URL("./x.png", import.meta.url)` and `require.resolve("literal")` |
 | Computed `import()` is rejected (`:269`) | For template literals with a static prefix, include the matching files, as webpack context modules do. Otherwise **fall back wide** |
 | Entry files are a fixed list (`:22`) | Derive the list from Next's conventions and the app's `pageExtensions`, and include `next.config` imports. Check it again on every Next major |
-| Builds use `next build --webpack` and a webpack alias (`vercel-build.json`, `next.config.js`) | Link the projected tree as the package itself in the action's `node_modules`, so the build works with Turbopack and webpack and needs no config hook |
+| Builds use `next build --webpack` and a webpack alias (`vercel-build.json`, `next.config.js`) | Link the projected tree as the package itself in the action's `node_modules`, so no config hook is needed. A Turbopack build against the projection matches one against the whole package, but Turbopack rejects the symlinks of Bazel's sandbox, so bobr still builds with webpack |
 | The projection ignores `sideEffects: false` and keeps unused barrel branches (`:370`) | Match the bundler. Drop exactly what webpack or Turbopack would drop, and no more |
 
 ## Fall back wide, never fail
@@ -96,9 +101,11 @@ The projection is a hand-written model of what the bundler sees, so it needs an
 oracle. For every app, build twice, once against the full workspace packages and
 once against the projected trees. Then compare the two outputs. They must match
 after normalizing chunk hashes and module ids, which differ with build paths.
-bobr has no normalizer, so write one. In a manual comparison of two bobr builds,
-the archives held the same file set once chunk-hash file names were normalized.
-The module ids inside differed because Bazel's output path differed.
+bobr's `equivalence_test` and `tools/bazel/compare-archives.ts` do this. Webpack
+derives some module ids from absolute paths, which differ between Bazel
+sandboxes, so both equivalence builds set `BOBR_NAMED_IDS` and name modules by
+path. The normalizer then replaces content hashes, sandbox paths, Next's
+per-build keys and Vercel's build traces.
 
 A difference means the projection dropped something the bundler used, such as
 a CSS class, an asset or a module with side effects. Treat any difference as a
@@ -124,9 +131,10 @@ the user before pushing.
    `shared_package()`, the per-file unit tests, `build_files_test` and the
    Playwright setup. Done when `bazel test //...` passes and a second run with
    no edits executes zero actions.
-3. **Projection.** Generalize `project-ui.ts` using the limits table and the
-   fallback rules above. Port bobr's tests (`tools/bazel/project-ui.test.ts`,
-   `scripts/review-ui-projection.ts`) and add a fixture for each new pattern.
+3. **Projection.** Port bobr's projection and its tests
+   (`tools/bazel/projection.test.ts`). Check it against the limits table and
+   the fallback rules above, and add a fixture for each pattern this repository
+   has that bobr's tests lack.
    Done when the projection runs on every app without errors, the equivalence
    check passes for every app, and the projection report is reviewed with the
    user.

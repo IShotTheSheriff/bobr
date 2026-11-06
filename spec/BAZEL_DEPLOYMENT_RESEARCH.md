@@ -10,7 +10,7 @@ The subsequent [evaluation follow-up](BAZEL_EVALUATION.md#follow-up-fixes-on-202
 
 Bazel records an action's declared files, command and environment, then maps that action to stored outputs. A hit retrieves those outputs without executing the action. The cache does not need a fresh Next output to compare against the old one. This follows from Bazel's documented action-cache and content-store design. [Bazel remote caching](https://bazel.build/remote/caching)
 
-The implementation gives Next the generated `ui_runtime` directory rather than the raw utility package. Its mutation proof checks action execution and complete output bytes. That is the right experiment for the unused-export requirement. See [the build macro](../tools/bazel/defs.bzl), lines 79 and 87, and [the proof](../scripts/prove-next-invalidation.py), lines 67 through 85.
+The implementation gives Next the projected workspace packages rather than the raw packages. Its mutation proof checks action execution and complete output bytes. That is the right experiment for the unused-export requirement. See [the build macro](../tools/bazel/defs.bzl), lines 79 and 87, and [the proof](../scripts/prove-next-invalidation.py), lines 67 through 85.
 
 The [Linux proof run](https://github.com/IShotTheSheriff/bobr/actions/runs/39994990364) on `IShotTheSheriff/bobr` passed all 14 cases. It shows the proof runs on Linux. [The evaluation](BAZEL_EVALUATION.md#cache-evidence) covers restoring an earlier run's cache.
 
