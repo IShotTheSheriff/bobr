@@ -144,20 +144,19 @@ def next_app():
         visibility = ["//visibility:public"],
     )
 
-    # The equivalence check builds the app twice more, against the projection
-    # and against every workspace package whole, and compares the archives.
-    # A difference means the projection dropped something Next reads. Webpack
-    # derives some module ids from absolute paths, which differ between
-    # sandboxes, so both builds name modules by path. CI runs the check on a
-    # schedule and when the projection or a bundler changes.
-    _next_build("next_build_named", "vercel_output_named.tar", sources + deps + runtime_links + [":projection"], "runtime", named_ids = True)
+    # The equivalence check builds the app once more, against every workspace
+    # package whole, and compares the archive with the projected build's.
+    # A difference means the projection dropped something Next reads.
+    # Turbopack names modules by their path under the build root, which is
+    # the same in both sandboxes. CI runs the check on a schedule and when the
+    # projection or a bundler changes.
     _projection("projection_whole", "copy", ["package.json"] + packages, "ProjectionCopy", package_args, tags = ["manual"])
-    _next_build("next_build_whole", "vercel_output_whole.tar", sources + deps + runtime_links + [":projection_whole"], "copy", named_ids = True)
+    _next_build("next_build_whole", "vercel_output_whole.tar", sources + deps + runtime_links + [":projection_whole"], "copy", tags = ["manual"])
     js_test(
         name = "equivalence_test",
         entry_point = "//tools/bazel:compare_archives",
-        data = [":next_build_named", ":next_build_whole", "//:node_modules/tar"],
-        args = ["$(rootpath :next_build_named)", "$(rootpath :next_build_whole)"],
+        data = [":next_build", ":next_build_whole", "//:node_modules/tar"],
+        args = ["$(rootpath :next_build)", "$(rootpath :next_build_whole)"],
         size = "large",
         tags = ["manual", "equivalence"],
     )
@@ -191,14 +190,14 @@ def _projection(name, mode, srcs, mnemonic, package_args, tags = []):
         tags = tags,
     )
 
-def _next_build(name, archive, srcs, mode, named_ids = False):
+def _next_build(name, archive, srcs, mode, tags = []):
     js_run_binary(
         name = name,
         srcs = srcs,
         chdir = native.package_name(),
         env = select({
-            "//tools/bazel:production": _next_env("production", mode, archive, named_ids),
-            "//conditions:default": _next_env("preview", mode, archive, named_ids),
+            "//tools/bazel:production": _next_env("production", mode, archive),
+            "//conditions:default": _next_env("preview", mode, archive),
         }),
         mnemonic = "NextBuild",
         # The archive is the only output. Leaving `.next` undeclared keeps the
@@ -207,7 +206,7 @@ def _next_build(name, archive, srcs, mode, named_ids = False):
         tool = "//tools/bazel:build_next",
         visibility = ["//visibility:public"],
         use_execroot_entry_point = True,
-        tags = ["manual"] if named_ids else [],
+        tags = tags,
     )
 
 def shared_package():
@@ -322,8 +321,8 @@ def next_app_e2e(app):
         tags = ["browser"],
     )
 
-def _next_env(target, mode, archive, named_ids):
-    env = {
+def _next_env(target, mode, archive):
+    return {
         "NEXT_TELEMETRY_DISABLED": "1",
         "NODE_ENV": "production",
         "BOBR_BUILD_ID": "bobr-static",
@@ -331,6 +330,3 @@ def _next_env(target, mode, archive, named_ids):
         "BOBR_ARCHIVE": archive,
         "BOBR_DEPLOY_ENV": target,
     }
-    if named_ids:
-        env["BOBR_NAMED_IDS"] = "1"
-    return env

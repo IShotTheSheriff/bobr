@@ -172,7 +172,7 @@ def main():
         for spec in (checkout / "packages/docs-e2e/src").glob("*.ts"):
             spec.write_text(spec.read_text().replace('"45"', '"44"').replace('"46"', '"45"'))
     run("used-sub", {"docs"}, {"docs"})
-    # @repo/ui declares sideEffects false, so webpack drops a module that no
+    # @repo/ui declares sideEffects false, so Turbopack drops a module that no
     # import uses, effects included. The projection drops it too. The
     # equivalence check shows that a build of the whole package agrees.
     unused.write_text('globalThis.__bobr_side_effect__ = "effect-one";\nexport const unused = () => 202;\n')
@@ -215,7 +215,7 @@ def main():
             assert 'from "@repo/ui/utils"' not in text, f"{file}: update the proof's import rewrite"
             file.write_text(text)
     run("relative-side-effect-import", APPS, APPS)
-    # Under sideEffects false, webpack drops a bare import of a module whose
+    # Under sideEffects false, Turbopack drops a bare import of a module whose
     # exports nobody uses, so its effects never run.
     unused.write_text(unused.read_text().replace("effect-one", "relative-effect-three"))
     run("unused-effect-behind-relative-import", set(), set())

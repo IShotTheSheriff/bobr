@@ -150,7 +150,7 @@ Next trees, and rejects raw UI package inputs on any Next action.
 | Effect behind a bare `import "./utils"` changes | Both | Neither |
 | `sideEffects` removed from `@repo/ui`, then that effect changes | Both | Both |
 
-`@repo/ui` declares `"sideEffects": false`, so webpack drops a module no import
+`@repo/ui` declares `"sideEffects": false`, so Turbopack drops a module no import
 uses, effects included. For the two effect rows where Next does not run, the
 script also runs the equivalence check, which builds both apps against the whole
 package and finds the same archives. An effect that reaches a bundle must appear

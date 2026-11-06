@@ -91,7 +91,7 @@ CommonJS, styles and assets. Other modules lose the top-level statements that no
 used export reaches and that cannot run code. They also lose comments and
 indentation, so a comment edit inside a used function changes nothing. An unused
 import of a module that the package's `sideEffects` field marks as free of
-effects disappears, as webpack drops it. Other unused imports stay as a bare
+effects disappears, as Turbopack drops it. Other unused imports stay as a bare
 `import "x"`. An initializer that can run code stays unless `/*#__PURE__*/`
 marks it.
 
@@ -125,13 +125,13 @@ that cache hit. No output normalization or developer-maintained semantic hashes
 control this decision.
 
 The projection is a model of what Next reads, so it has an oracle.
-`//apps/web:equivalence_test` builds the app twice more, against the projection
-and against every workspace package whole, and compares the two archives. Both
-builds use webpack's path-based module ids, so the sandbox path stays out of
-them. The comparison replaces content hashes, sandbox paths and Next's
-per-build keys. A difference means the projection dropped something Next reads,
-such as a Tailwind class. The test is manual. CI runs it weekly and whenever the
-build setup changes:
+`//apps/web:equivalence_test` builds the app once more, against every workspace
+package whole, and compares that archive with the projected build's. Turbopack
+names chunks by their content and modules by their path under the build root,
+so the comparison replaces only sandbox paths and the secrets Next generates
+for every build. A difference means the projection dropped something Next
+reads, such as a Tailwind class. The test is manual. CI runs it weekly and
+whenever the build setup changes:
 
 ```bash
 bazel test //apps/web:equivalence_test //apps/docs:equivalence_test
@@ -193,7 +193,7 @@ trees and deployment archive bytes, and saves JSON evidence with execution logs.
 | Start a fresh client with only HTTP cache access    | Cache hit                   | Cache hit                    |
 | Edit an unused export on another fresh client       | Cache hit                   | Cache hit                    |
 
-`@repo/ui` declares `"sideEffects": false`, so webpack drops a module whose
+`@repo/ui` declares `"sideEffects": false`, so Turbopack drops a module whose
 exports nobody uses, effects included. The two reused effect rows also run the
 equivalence check, which shows that a build of the whole package drops the
 effect too.
@@ -230,13 +230,20 @@ ESLint and TypeScript configs, stay whole. `.env` files in an app are build
 inputs. Values from the CI environment or the network are not, so declare them
 before an app reads them.
 
-The Next build uses webpack. Turbopack refuses the symlinks that Bazel's
-sandbox builds an action's inputs from, and fails with `Symlink
-[project]/apps/web/package.json is invalid, it points out of the filesystem
-root`. Outside Bazel, a Turbopack build of `apps/web` against the projection
-matched a build against the whole package, apart from the keys Next generates
-for every build. The projection works with both bundlers. The sandbox is the
-limit.
+The Next build uses Turbopack. Bazel's sandbox gives an action its inputs as
+absolute symlinks into the execroot, and Turbopack refuses a symlink that
+points outside its root: `Symlink [project]/apps/web/package.json is invalid,
+it points out of the filesystem root`. Before the build,
+`tools/bazel/materialize-inputs.ts` replaces those links with the files
+themselves, as clones where the file system supports them, such as APFS, and
+as hard links elsewhere. rules_js patches
+Node's `fs` so that these links look like regular files, so the script runs in
+a child process with the patch off. On macOS the step takes about 5 seconds
+for the 23,000 files of a Next build's inputs. Remote execution workers
+usually give an action regular files, so there the step should find nothing to
+replace. bobr has not tested remote execution. A build with
+`next build --webpack` skips the step, but the equivalence check would then
+need module ids that do not depend on the sandbox path.
 
 See [the evaluation](spec/BAZEL_EVALUATION.md) for evidence and remaining gaps.
 [The migration notes](spec/BAZEL_MIGRATION.md) describe the original graph.

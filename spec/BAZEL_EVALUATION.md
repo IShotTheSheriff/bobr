@@ -176,9 +176,11 @@ optimizer, not a replacement for Next's own route and React compiler analysis.
 
 The projection is a model of what Next reads. The equivalence check is its
 oracle, and it only runs when CI's trigger sees a build-system change or on the
-weekly schedule. A Next or webpack upgrade arrives through `pnpm-lock.yaml`,
-which triggers it. The Next build stays on webpack because Turbopack rejects
-the symlinks Bazel's sandbox is made of.
+weekly schedule. A Next upgrade arrives through `pnpm-lock.yaml`, which
+triggers it. The Next build uses Turbopack, which rejects the symlinks Bazel's
+sandbox is made of. `tools/bazel/materialize-inputs.ts` replaces them with
+clones or hard links before every Turbopack build, which costs about 5 seconds
+per build on macOS.
 
 Routine edits need no rule changes. A new app still needs a copied four-line
 BUILD file, an e2e package and a Vercel project. `//:build_files_test` fails

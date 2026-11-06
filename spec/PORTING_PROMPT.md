@@ -69,7 +69,7 @@ this repository and confirm a test covers it.
 | `import.meta` and `require.resolve` are rejected (`:258`) | Handle the literal forms statically, such as `new URL("./x.png", import.meta.url)` and `require.resolve("literal")` |
 | Computed `import()` is rejected (`:269`) | For template literals with a static prefix, include the matching files, as webpack context modules do. Otherwise **fall back wide** |
 | Entry files are a fixed list (`:22`) | Derive the list from Next's conventions and the app's `pageExtensions`, and include `next.config` imports. Check it again on every Next major |
-| Builds use `next build --webpack` and a webpack alias (`vercel-build.json`, `next.config.js`) | Link the projected tree as the package itself in the action's `node_modules`, so no config hook is needed. A Turbopack build against the projection matches one against the whole package, but Turbopack rejects the symlinks of Bazel's sandbox, so bobr still builds with webpack |
+| Builds use `next build --webpack` and a webpack alias (`vercel-build.json`, `next.config.js`) | Link the projected tree as the package itself in the action's `node_modules`, so no config hook is needed. Build with Turbopack. It rejects the symlinks of Bazel's sandbox, so replace them with clones or hard links first, as `tools/bazel/materialize-inputs.ts` does |
 | The projection ignores `sideEffects: false` and keeps unused barrel branches (`:370`) | Match the bundler. Drop exactly what webpack or Turbopack would drop, and no more |
 
 ## Fall back wide, never fail
@@ -99,13 +99,13 @@ include it.
 
 The projection is a hand-written model of what the bundler sees, so it needs an
 oracle. For every app, build twice, once against the full workspace packages and
-once against the projected trees. Then compare the two outputs. They must match
-after normalizing chunk hashes and module ids, which differ with build paths.
-bobr's `equivalence_test` and `tools/bazel/compare-archives.ts` do this. Webpack
-derives some module ids from absolute paths, which differ between Bazel
-sandboxes, so both equivalence builds set `BOBR_NAMED_IDS` and name modules by
-path. The normalizer then replaces content hashes, sandbox paths, Next's
-per-build keys and Vercel's build traces.
+once against the projected trees. Then compare the two outputs. bobr's
+`equivalence_test` and `tools/bazel/compare-archives.ts` do this. Turbopack
+names chunks by content and modules by their path under the build root, so the
+two archives match byte for byte apart from sandbox paths, the secrets Next
+generates for every build and Vercel's build traces. The normalizer replaces
+only those. Webpack derives some module ids from absolute paths, so a webpack
+build would also need path-based module ids.
 
 A difference means the projection dropped something the bundler used, such as
 a CSS class, an asset or a module with side effects. Treat any difference as a

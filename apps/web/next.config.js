@@ -11,17 +11,6 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ["@repo/ui"],
   },
-  // The equivalence check compares two builds made in different Bazel
-  // sandboxes. Path-based module ids keep the sandbox path out of them.
-  ...(process.env.BOBR_NAMED_IDS
-    ? {
-        webpack(config) {
-          config.optimization.moduleIds = "named";
-          config.optimization.chunkIds = "named";
-          return config;
-        },
-      }
-    : {}),
 };
 
 export default nextConfig;

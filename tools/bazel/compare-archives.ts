@@ -1,21 +1,21 @@
 // The equivalence check. Compares the deployment archive built from the
-// projection with the one built from every workspace package whole. Content
-// hashes in chunk names differ between any two Next builds, so the check
-// replaces them before comparing. Any other difference means the projection
-// dropped or changed something Next reads.
+// projection with the one built from every workspace package whole. Turbopack
+// names chunks by content and modules by path, so the two archives match byte
+// for byte apart from per-build secrets and sandbox paths. Any other
+// difference means the projection dropped or changed something Next reads.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
 
-// Content hashes Next puts in file names and references: 16 or more hex digits.
-const HASH = /(?<![0-9a-f])[0-9a-f]{16,}(?![0-9a-f])/g;
 // Absolute paths into the action's sandbox, which differ for every action.
 // Loader requests in module names carry them URL-encoded.
 const EXECROOT = /(?:\/[\w.@+~-]+)*\/execroot\/_main\//g;
 const ENCODED_EXECROOT = /(?:%2F[\w.@+~-]+)*%2Fexecroot%2F_main%2F/g;
-// Next generates a new server actions key for every build.
-const KEY = /"encryptionKey":"[^"]*"/g;
+// Next generates new server action and preview mode secrets for every build.
+// Their JSON appears compact, indented and escaped inside a JavaScript string.
+const SECRET =
+  /(\\*"(?:encryptionKey|bypassToken|previewModeId|previewModeSigningKey|previewModeEncryptionKey)\\*":\s*\\*")[^"\\]*/g;
 // Vercel's and Next's build traces hold timings and random ids.
 const SKIPPED = ["diagnostics/", "static/_next/__private/trace"];
 
@@ -23,8 +23,7 @@ export function normalize(text: string) {
   return text
     .replace(EXECROOT, "<execroot>/")
     .replace(ENCODED_EXECROOT, "<execroot>%2F")
-    .replace(KEY, '"encryptionKey":"<key>"')
-    .replace(HASH, "<hash>");
+    .replace(SECRET, "$1<secret>");
 }
 
 function files(dir: string, prefix = ""): string[] {

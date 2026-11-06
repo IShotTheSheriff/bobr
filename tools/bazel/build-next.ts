@@ -22,6 +22,17 @@ linkProjection(
   rootDirectory,
   settings.rootDirectory,
 );
+// Turbopack refuses the sandbox's links to files outside it. A child process
+// replaces them, with rules_js's fs patch off so that it can see them.
+if (!/\s--webpack\b/.test(settings.buildCommand)) {
+  const materialized = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "materialize-inputs.ts"), rootDirectory],
+    { stdio: "inherit", env: { ...process.env, JS_BINARY__PATCH_NODE_FS: "0" } },
+  );
+  if (materialized.error) throw materialized.error;
+  if (materialized.status !== 0) process.exit(materialized.status || 1);
+}
 process.chdir(rootDirectory);
 fs.mkdirSync(".vercel", { recursive: true });
 fs.writeFileSync(
